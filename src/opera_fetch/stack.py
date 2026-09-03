@@ -148,7 +148,9 @@ def assemble(paths, aoi=None, aoi_crs=None, how=None, tolerance=TOLERANCE,
         Also blank what falls outside the AOI polygon, rather than outside its bounding box.
     reproject_to
         A CRS to put every zone on, returning a single Dataset instead of one per zone.
-        This is the only resampling the package does, which is why it has to be asked for.
+        ``"auto"`` picks the zone already holding the most of the AOI, so the bulk of the
+        data stays on the grid OPERA delivered and only the smaller zone moves. This is
+        the only resampling the package does, which is why it has to be asked for.
     resampling
         How the real layers are interpolated: any name from ``rasterio.enums.Resampling``,
         nearest by default. A mask is categorical and always moves by nearest. A complex
@@ -216,6 +218,8 @@ def assemble(paths, aoi=None, aoi_crs=None, how=None, tolerance=TOLERANCE,
     if len(stacks) > 1:
         log.info("this AOI spans %d UTM zones, %s, which cannot share a grid. Pass "
                  "reproject_to to put them on one.", len(stacks), sorted(stacks))
+    if reproject_to == "auto":
+        reproject_to = f"EPSG:{_best_zone(stacks)}"
     if reproject_to is not None:
         return _onto_one_crs(stacks, reproject_to, resampling)
     return stacks
@@ -270,6 +274,29 @@ def _all_equal(layers):
     """
     first = layers[0].values
     return all(np.array_equal(first, other.values, equal_nan=True) for other in layers[1:])
+
+
+def _best_zone(stacks):
+    """The EPSG to reproject onto when the caller would rather not name one.
+
+    Whichever zone is chosen the others must be resampled, so the choice is really which
+    values get to stay put, and the zone holding the most of them leaves the fewest to move.
+    That is coverage and acquisitions together, not either alone: a zone covering two thirds
+    of the AOI still loses to one covering a third of it four times as often.
+    """
+    from opera_fetch.validate import primary_variable
+
+    held = {epsg: int(np.isfinite(stack[primary_variable(stack)]).sum())
+            for epsg, stack in stacks.items()}
+
+    # Sorted first, so a tie goes to the lower EPSG rather than to whichever zone was read
+    # first. The same AOI should pick the same zone every run.
+    best = max(sorted(held), key=lambda epsg: held[epsg])
+    if len(held) > 1:
+        log.info("reprojecting onto EPSG:%d, which leaves the fewest values to move (%s)",
+                 best, ", ".join(f"EPSG:{epsg} holds {n:,}"
+                                 for epsg, n in sorted(held.items())))
+    return best
 
 
 def _onto_one_crs(stacks, crs, resampling=None):

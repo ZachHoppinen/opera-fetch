@@ -68,8 +68,10 @@ def fetch_stacks(aoi, start=None, end=None, product=const.RTC, cache_dir="data/r
         Parallel downloads.
 
     reproject_to
-        A CRS to put every zone on, giving one Dataset instead of one per zone. The only
-        resampling in the package, which is why it has to be asked for by name.
+        A CRS to put every zone on, giving one Dataset instead of one per zone.
+        ``"auto"`` picks it for you: the zone already holding the most of the AOI, so the
+        bulk of the data keeps OPERA's own grid and only the smaller zone is resampled.
+        The only resampling in the package, which is why it has to be asked for.
     resampling
         How the real layers are interpolated: any name from ``rasterio.enums.Resampling``,
         nearest by default. A mask always moves by nearest, being categorical, and a
@@ -90,6 +92,8 @@ def fetch_stacks(aoi, start=None, end=None, product=const.RTC, cache_dir="data/r
         RTC gives ``vv``, ``vh`` or ``hh``, ``hv``, plus ``mask``, as linear gamma0 and
         unmasked. CSLC gives complex ``vv`` or ``hh``.
 
+        With reproject_to, a single Dataset on that CRS rather than a dict.
+
     Examples
     --------
     A month of backscatter over the East River, written to netCDF::
@@ -102,10 +106,9 @@ def fetch_stacks(aoi, start=None, end=None, product=const.RTC, cache_dir="data/r
         for epsg, stack in stacks.items():
             print(epsg, of.summary(stack))
 
-    Everything over one AOI on a single grid, resampling the smaller zone::
+    Everything over one AOI as a single Dataset, without having to know the zone::
 
-        stack = of.fetch_stacks(aoi, "2024-11-01", "2024-11-30",
-                                reproject_to="EPSG:32613")
+        stack = of.fetch_stacks(aoi, "2024-11-01", "2024-11-30", reproject_to="auto")
 
     One descending track only, from a shapefile, with the layover/shadow mask applied::
 

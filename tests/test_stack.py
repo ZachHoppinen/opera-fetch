@@ -382,3 +382,63 @@ def test_a_crs_no_zone_is_in_says_everything_moves(caplog):
     with caplog.at_level(logging.WARNING, logger="opera_fetch.stack"):
         _onto_one_crs({32612: a, 32613: b}, "EPSG:32611")
     assert "no zone is in" in caplog.text
+
+
+def test_auto_picks_the_zone_that_leaves_the_fewest_values_to_move():
+    """Nobody knows their UTM zone offhand, so 'auto' picks the one holding the most data.
+
+    Coverage alone and acquisition count alone both get this wrong, so each case below is
+    one where the two disagree and only their product gives the answer that resamples less.
+    """
+    from opera_fetch.stack import _best_zone
+
+    # Wide but rarely imaged, 48 cells x 2, against a sliver imaged often, 12 cells x 9.
+    wide = make_burst(west=500_010, north=4_332_210, epsg=32612, times=2)
+    often = make_burst(west=500_010, north=4_332_210, epsg=32613, times=9)
+    often["vv"][:, :, 2:] = np.nan
+    assert _best_zone({32612: wide, 32613: often}) == 32613, "96 values would move, not 108"
+
+    # Same shapes, but now the sliver is imaged only three times: 48 x 2 beats 12 x 3.
+    seldom = make_burst(west=500_010, north=4_332_210, epsg=32613, times=3)
+    seldom["vv"][:, :, 2:] = np.nan
+    assert _best_zone({32612: wide, 32613: seldom}) == 32612, "36 values would move, not 96"
+
+
+def test_auto_is_repeatable_when_two_zones_hold_the_same():
+    """Same AOI, same answer: a tie must not fall to whichever zone was read first."""
+    from opera_fetch.stack import _best_zone
+
+    a = make_burst(west=500_010, north=4_332_210, epsg=32612)
+    b = make_burst(west=500_010, north=4_332_210, epsg=32613)
+    assert _best_zone({32612: a, 32613: b}) == 32612
+    assert _best_zone({32613: b, 32612: a}) == 32612
+
+
+def test_auto_leaves_the_chosen_zone_on_operas_own_grid():
+    """The point of choosing the busiest zone is that most of the data then never moves."""
+    from opera_fetch.stack import _best_zone, _onto_one_crs
+
+    winner = make_burst(west=500_010, north=4_332_210, epsg=32612)
+    other = make_burst(west=500_010, north=4_332_210, epsg=32613)
+    other["vv"][:, :, 4:] = np.nan          # half the coverage, same number of acquisitions
+
+    zones = {32612: winner, 32613: other}
+    joined = _onto_one_crs(zones, f"EPSG:{_best_zone(zones)}")
+
+    assert joined.rio.crs.to_epsg() == 32612
+    assert np.array_equal(joined.x.values, winner.x.values), "the winner's grid moved"
+    assert np.array_equal(joined.y.values, winner.y.values), "the winner's grid moved"
+
+
+def test_auto_on_a_single_zone_resamples_nothing(caplog):
+    """The common case: one zone, and 'auto' just unwraps the dict without touching it."""
+    import logging
+
+    from opera_fetch.stack import _best_zone, _onto_one_crs
+
+    only = make_burst(west=500_010, north=4_332_210, epsg=32612)
+    with caplog.at_level(logging.WARNING, logger="opera_fetch.stack"):
+        joined = _onto_one_crs({32612: only}, f"EPSG:{_best_zone({32612: only})}")
+
+    assert np.array_equal(joined.vv.values, only.vv.values)
+    assert "moves a value" not in caplog.text

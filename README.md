@@ -79,15 +79,24 @@ coordinates, and forcing them to would mean resampling every pixel of one of the
 for the CSLCs should be done carefully and potentially not at all.
 
 Usually there is a single entry, and a large cross-zone AOI is the only thing that forces a second.
-When it does, you can ask for them to reprojected to the same UTM:
+When it does, `reproject_to` puts them on one grid and gives back a single Dataset:
 
 ```python
-stacks = of.fetch_stacks(aoi, start, end, reproject_to="EPSG:32613")   # one Dataset
+stack = of.fetch_stacks(aoi, start, end, reproject_to="auto")          # one Dataset
+stack = of.fetch_stacks(aoi, start, end, reproject_to="EPSG:32613")    # if you care which
 ```
 
+You should not have to know your UTM zone to get one Dataset, so `"auto"` picks it.
+Whichever zone is chosen the others get resampled, so the choice is really which values
+stay put, and `"auto"` takes the zone holding the most of them: coverage and acquisitions
+together, not either alone. A zone covering two thirds of the AOI still loses to one
+covering a third of it four times as often, because that one has more data in it. The
+winner keeps the grid OPERA delivered, untouched. Ties go to the lower EPSG, so the same
+AOI picks the same zone on every run, and where there is only one zone, which is the usual
+case, `"auto"` resamples nothing at all and simply hands back that Dataset.
+
 `reproject_to` is the only resampling in the package, which is why it has to be asked for
-by name. It moves the smaller zone onto the larger one's grid, so the larger part of the
-result is still on a grid OPERA delivered.
+by name.
 
 **A zone already in the CRS you asked for is not touched.** It becomes the reference and
 keeps its own grid, so only the other zones move and the result stays on a lattice OPERA
