@@ -40,6 +40,9 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# So `pytest` alone works from a clean checkout: src for the package when it is not
+# installed, and the root so the shared test helpers import as tests.conftest.
+pythonpath = ["src", "."]
 markers = [
     "network: hits ASF for real. Deselect with -m 'not network'.",
     "data: needs OPERA granules on this machine, and skips itself when they are absent.",
