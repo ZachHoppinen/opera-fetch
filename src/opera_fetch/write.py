@@ -26,12 +26,12 @@ def write(obj, path, complevel=4):
         raise ValueError(f"cannot write {path.suffix!r}; use .nc, .h5 or .zarr")
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    # A lone stack writes to the root; passes each get their own group.
+    # A lone stack writes to the root; several zones each get their own group.
     stacks = obj if isinstance(obj, dict) else {None: obj}
     mode = "w"
     for key, stack in stacks.items():
         stack = _clean(stack)
-        group = key.name if key is not None else None
+        group = f"EPSG{key}" if key is not None else None
         if path.suffix == ".zarr":
             stack.to_zarr(path, group=group, mode=mode, consolidated=True)
         else:
@@ -41,7 +41,7 @@ def write(obj, path, complevel=4):
                             invalid_netcdf=has_complex, encoding=_encoding(stack, complevel))
         mode = "a"
 
-    log.info("wrote %d pass(es) to %s", len(stacks), path)
+    log.info("wrote %d zone(s) to %s", len(stacks), path)
     return path
 
 

@@ -22,7 +22,7 @@ def cache_dir_path(cache_dir, url):
 def fetch_stacks(aoi, start=None, end=None, product=const.RTC, cache_dir="data/raw/opera",
                  aoi_crs=None, static=True, layers=None, static_layers=None, track=None,
                  direction=None, out=None, mask=False, how=None, tolerance=TOLERANCE,
-                 chunks=None, extra=(), max_workers=10):
+                 chunks=None, extra=(), max_workers=10, reproject_to=None):
     """Search, download, mosaic, stack, clip and check. One Dataset per pass.
 
     Parameters
@@ -147,13 +147,13 @@ def fetch_stacks(aoi, start=None, end=None, product=const.RTC, cache_dir="data/r
     # assemble does both: bursts are mosaicked and the result stacked in time.
     log.info("step 4/6 and 5/6  mosaicking bursts and stacking them in time")
     stacks = assemble(paths, aoi=aoi, how=how, tolerance=tolerance, chunks=chunks,
-                      extra=extra, mask=mask)
+                      extra=extra, mask=mask, reproject_to=reproject_to)
 
     log.info("step 6/6  clipped to the AOI; checking")
-    for key, stack in stacks.items():
+    for key, stack in (stacks.items() if isinstance(stacks, dict) else [(None, stacks)]):
         # report raises on damage; summary is what makes the step visible.
         report(stack, aoi=aoi)
-        log.info("%s\n%s", key, summary(stack, aoi=aoi))
+        log.info("EPSG:%s\n%s", key or stack.rio.crs.to_epsg(), summary(stack, aoi=aoi))
 
     if out is not None:
         write(stacks, out)

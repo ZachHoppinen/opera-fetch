@@ -29,18 +29,7 @@ coverage   100% of cells finite, median over time
 aoi        100% of the AOI is inside the grid
 ```
 
-Every step is public, and worth reaching for on its own when a search wants looking at
-before anything is downloaded, or when the files are already on disk:
-
-```python
-found = of.search(aoi, "2024-11-01", "2024-11-30", product=of.RTC)
-print(found.groupby(["track", "direction"]).burst_id.nunique())
-paths = of.download(of.data_urls(found), "data/raw")   # data_urls logs the GB first
-stacks = of.assemble(paths, aoi=aoi)          # mosaic, stack, clip
-print(of.summary(stacks[key], aoi=aoi))
-```
-
-## What it will not do
+## Processing choices
 
 **Nothing is resampled.** OPERA delivers every burst on a fixed lattice in the UTM zone it
 falls in, so two bursts of one track, and the same burst reprocessed next year, share their
@@ -48,26 +37,45 @@ pixel centres exactly. Mosaicking and clipping are coordinate lookups, so every 
 comes out is a value that went in. Reprojecting is left to whatever comes next, which is
 the step that knows what it wants.
 
-The lattice is taken from a product rather than rebuilt from a rule about where OPERA
-snaps. It happens to snap to multiples of the posting in every zone anyone has checked, but
-anchoring on a real burst is exact by construction, so it stays right for a zone,
-hemisphere or posting nobody has.
+The lattice is taken from the OPERA products themselves.
 
-That is why a result is **one Dataset per pass**, keyed by track, direction and UTM zone:
+That is why a result is **one Dataset per UTM zone**, keyed by EPSG:
 
 ```python
-{Pass(track=49, direction='ASCENDING', epsg=32612): <xarray.Dataset>,
- Pass(track=56, direction='DESCENDING', epsg=32613): <xarray.Dataset>}
+{32612: <xarray.Dataset>, 32613: <xarray.Dataset>}
 ```
 
-Those are exactly the boundaries a single grid cannot cross. Ascending and descending land
-on the same day and averaging them destroys the diurnal difference. Tracks have their own
-look geometry. An AOI on a zone boundary gives two entries, and joining them means
-reprojecting one.
+Usually one entry. The zone is the only thing that forces a second, because OPERA assigns
+it per burst: over the East River two tracks come as 32612 and two as 32613, and no grid
+holds both. It is not rare, either. Of four mountain sites, two straddled a boundary.
 
-**Polarization is not always VV.** Sentinel-1 acquires HH+HV at high latitude, so a
-Svalbard or Antarctic burst carries no VV at all. Both pairs are fetched and read; the
-variables are named for what arrived.
+Within a zone OPERA's grid is constant, so every track lands on it. **Every acquisition is
+one step on the time axis**, whichever track it came from, with `track` and `direction` as
+coordinates alongside:
+
+```python
+stack.sel(time=stack.track == 49)          # one track
+stack.sel(time=stack.direction == "ASCENDING")
+```
+
+Nothing is padded to make that work: four acquisitions across two tracks are four rows.
+
+Ascending and descending still must not be *averaged* together, and neither must two
+tracks. That is a mosaic rule, and mosaicking happens per pass before any of this.
+
+If you would rather have one Dataset than two, ask for it by name:
+
+```python
+stacks = of.fetch_stacks(aoi, start, end, reproject_to="EPSG:32613")
+```
+
+That is the only resampling in the package, which is why it has to be requested. It moves
+the smaller zone onto the larger one's grid, nearest neighbour, so no value is invented.
+
+**Neighbouring bursts are found by a tolerance.** That is enough to make every burst's
+time axis unique and a mosaic of them an empty diagonal ribbon. `align_passes` collapses
+timestamps closer together than a tolerance (10 minutes by default) into one pass. `assemble`
+does this for you.
 
 **Overlapping bursts are averaged by their looks**, which is how OPERA mosaics its own,
 rather than flat. In practice this changes almost nothing: `number_of_looks` is a function
@@ -79,9 +87,16 @@ Where two bursts disagree on the layover/shadow code the mosaic takes the worse 
 since both fed the averaged value. Averaging the codes themselves would be worse than
 either: shadow (1) and both (3) average to layover (2), a class nobody saw.
 
+**A mosaic's `time` is the earliest burst of that pass**, not each burst's own
+zero-doppler start. Down a track that is a few seconds; it is not the instant any
+particular pixel was measured. For per-burst timing, read the bursts and skip the mosaic:
+
+```python
+bursts = of.read_bursts(paths)      # each keeps its own acquisition times
+
 **Nothing is masked.** Values come out as OPERA delivers them: linear gamma0 for RTC, not
 dB; complex for CSLC, with the phase intact. The layover/shadow mask rides along as its own
-variable rather than being applied, so whether a layover pixel counts stays your decision:
+variable rather than being applied, so whether a layover pixel counts stays is a future decision:
 
 ```python
 clear = stack.where(stack.mask == 0)
@@ -90,7 +105,7 @@ clear = stack.where(stack.mask == 0)
 That line works for either product, but the two masks are not the same thing. OPERA ships
 an RTC mask **per acquisition**, so `mask` there has dims `(time, y, x)`. It ships no CSLC
 mask at all; the only one is in CSLC-STATIC, made **once per burst**, so `mask` there is
-`(y, x)` and broadcasts over time. Codes agree — 0 clear, 1 shadow, 2 layover, 3 both —
+`(y, x)` and broadcasts over time. Codes for both RTC and CSLC — 0 clear, 1 shadow, 2 layover, 3 both —
 but no-observation is 255 for RTC (uint8) and 127 for CSLC (int8).
 
 ## Products
@@ -128,38 +143,6 @@ Complex data has nowhere standard to live: netCDF-4 has no complex type, so a CS
 written to `.nc` goes through h5netcdf with `invalid_netcdf`. It is valid HDF5 and xarray
 reads it straight back, but a strict netCDF reader will not open it. **Use `.zarr` for
 CSLC.**
-
-## Things that will bite you
-
-**A burst's bounding box lies.** A burst is a rotated parallelogram inside a box about a
-third larger, and ASF returns granules that graze the edge of an area. Over one test AOI,
-two of four tracks came back with bounding boxes that clipped the corner and footprints
-covering 0.0% and 0.2% of it. Bursts are filtered on their real footprint, and a pass whose
-bursts touch the area but hold no data over it is dropped with a warning.
-
-**Neighbouring bursts are acquired seconds apart.** That is enough to make every burst's
-time axis unique and a mosaic of them an empty diagonal ribbon. `align_passes` collapses
-timestamps closer together than a tolerance (10 minutes by default) into one pass. `assemble`
-does this for you.
-
-**An AOI across the antimeridian is refused, not wrapped.** Left alone, `box(179.5, 51.5,
--179.5, 52)` comes out as the whole world *except* that box, and the search returns
-thousands of granules from everywhere. Split it at 180 and assemble each side: they fall in
-different UTM zones and could not share a grid anyway.
-
-**OPERA's archive starts years after Sentinel-1 did.** Around 2016, not 2014, so a range
-that ends before then is refused rather than returning an empty result that looks like the
-area was wrong. Ranges inside the December 2021 to 2025 single-satellite gap get a note:
-Sentinel-1B had failed and 1C was not yet operational, so there are about half the usual
-acquisitions.
-
-**A mosaic's `time` is therefore the earliest burst of that pass**, not each burst's own
-zero-doppler start. Down a track that is a few seconds; it is not the instant any
-particular pixel was measured. For per-burst timing, read the bursts and skip the mosaic:
-
-```python
-bursts = of.read_bursts(paths)      # each keeps its own acquisition times
-```
 
 ## Install
 
@@ -205,8 +188,7 @@ actually ships them.
 
 ## Sources
 
-No code is copied from these. What is taken is product facts and, in one case, an
-algorithm, all reimplemented on xarray.
+Very helpful repositories consulted:
 
 - [opera-adt/RTC](https://github.com/opera-adt/RTC) (Apache-2.0) defines the
   layover/shadow codes and the layer names, and its `mosaic_geobursts.py` is where
@@ -218,6 +200,3 @@ algorithm, all reimplemented on xarray.
   as `/data/VV` or `/data/HH`.
 - [opera-adt/CSLC-S1_Specs](https://github.com/opera-adt/CSLC-S1_Specs) is the CSLC product
   specification, used for the identification field names.
-
-Worth having installed alongside this if you work with DISP-S1 or NISAR: `opera-utils`
-covers both, and the burst/frame database, which this package does not.

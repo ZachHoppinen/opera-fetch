@@ -30,7 +30,7 @@ def main():
 
     stacks = of.assemble(paths, aoi=AOI)
     for key, stack in stacks.items():
-        print(f"\n=== {key}")
+        print(f"\n=== EPSG:{key}")
         print(of.summary(stack, aoi=AOI))
 
         # The phase is the measurement, so check it survived the trip.
@@ -39,7 +39,7 @@ def main():
         print(f"complex dtype {stack.vv.dtype}, "
               f"phase spread {np.std(np.angle(finite)):.2f} radians over {finite.size} pixels")
 
-        of.quicklook(stack, f"figures/cslc_example/{key.track:03d}_{key.direction.lower()}.png")
+        of.quicklook(stack, f"figures/cslc_example/epsg{key}.png")
 
     # Zarr, not netCDF: complex has no place in the netCDF-4 standard.
     of.write(stacks, "data/processed/cslc_example.zarr")

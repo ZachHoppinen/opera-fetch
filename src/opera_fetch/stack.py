@@ -16,6 +16,7 @@ from typing import NamedTuple
 
 import numpy as np
 import pandas as pd
+import xarray as xr
 from pyproj import CRS
 
 from opera_fetch import constants as const
@@ -118,7 +119,7 @@ def align_passes(bursts, tolerance=TOLERANCE):
 
 
 def assemble(paths, aoi=None, aoi_crs=None, bounds=None, how=None, tolerance=TOLERANCE,
-             chunks=None, extra=(), mask=False):
+             chunks=None, extra=(), mask=False, reproject_to=None):
     """Read, mosaic and stack every burst among the given files, one Dataset per pass.
 
     Parameters
@@ -145,60 +146,164 @@ def assemble(paths, aoi=None, aoi_crs=None, bounds=None, how=None, tolerance=TOL
         Names of the large per-acquisition CSLC phase screens to carry along as well.
     mask
         Also blank what falls outside the AOI polygon, rather than outside its bounding box.
+    reproject_to
+        A CRS to put every zone on, returning a single Dataset instead of one per zone.
+        This is the only resampling the package does, which is why it has to be asked for.
 
     Returns
     -------
-    dict of {Pass: xarray.Dataset}
-        Nothing is resampled, so each Dataset is on OPERA's own lattice in the projection
-        its bursts were delivered in.
+    dict of {int: xarray.Dataset}
+        One Dataset per UTM zone, keyed by EPSG, each on the grid OPERA delivered its
+        bursts on. Usually one entry; an AOI straddling a zone boundary gives two, because
+        those bursts genuinely cannot share a grid.
+
+        Every acquisition is one step on the time axis, whichever track it came from, with
+        ``track`` and ``direction`` as coordinates alongside it. Selecting a track is
+        ``stack.sel(time=stack.track == 49)``.
+
+        With reproject_to, a single Dataset on that CRS instead.
     """
     # Checked before anything is read, so a bad call costs nothing.
     if bounds is not None and aoi is not None:
         raise ValueError("give an aoi or bounds, not both: they both say what area to "
                          "deliver, and the aoi would win")
 
-    # Split the bursts along the boundaries one grid cannot cross.
-    grouped = defaultdict(list)
+    # A pass is what may be averaged together: one track, one direction, one zone.
+    # Ascending and descending land on the same day and must not be mixed in a mosaic.
+    passes = defaultdict(list)
     for burst in read_bursts(paths, chunks=chunks, extra=extra):
-        grouped[Pass(burst.attrs["track"], burst.attrs["direction"],
-                     CRS.from_user_input(burst.rio.crs).to_epsg())].append(burst)
+        passes[Pass(burst.attrs["track"], burst.attrs["direction"],
+                    CRS.from_user_input(burst.rio.crs).to_epsg())].append(burst)
 
     if aoi is not None:
         aoi = as_geometry(aoi, aoi_crs)
-    if bounds is not None and len({key.epsg for key in grouped}) > 1:
+    zones = {key.epsg for key in passes}
+    if bounds is not None and len(zones) > 1:
         raise ValueError(
-            f"bounds are in one projection, but these bursts span "
-            f"{sorted(k.epsg for k in grouped)}. "
-            "Give an aoi instead, which is reprojected per pass, or assemble one zone at a time.")
+            f"bounds are in one projection, but these bursts span {sorted(zones)}. "
+            "Give an aoi instead, which is reprojected per zone, or assemble one zone "
+            "at a time.")
 
-    stacks = {}
-    for key, group in sorted(grouped.items()):
+    mosaicked = defaultdict(list)
+    for key, group in sorted(passes.items()):
         wanted = _overlapping(group, aoi) if aoi is not None else group
         if not wanted:
             log.info("%s: no burst reaches the AOI", key)
             continue
 
         # Sizing the grid from the AOI keeps a whole track from being mostly empty space.
+        # Every pass of a zone gets the same bounds, and they are already on one lattice,
+        # so the grids come out identical and the passes concatenate without resampling.
         area = bounds if aoi is None else reproject(aoi, key.epsg).bounds
-        stack = mosaic(align_passes(wanted, tolerance), bounds=area, how=how).sortby("time")
+        stack = mosaic(align_passes(wanted, tolerance), bounds=area, how=how)
         if aoi is not None and mask:
             stack = clip(stack, aoi, mask=True)
-        stack.attrs.update(track=key.track, direction=key.direction, epsg=key.epsg,
-                           created=datetime.now(UTC).isoformat(timespec="seconds"),
-                           opera_fetch_version=const.__version__)
 
         if not _has_data(stack):
             # ASF returns granules that graze the edge of an area, and their footprints do
             # touch, but the data stops short.
             log.warning("%s: its bursts touch the AOI but hold no data over it; left out", key)
             continue
-        stacks[key] = stack
-        log.info("%s: %d times, %d by %d cells, %d bursts", key, stack.sizes["time"],
+
+        # Which pass an acquisition came from belongs on the time axis, not in a key:
+        # every acquisition is one row, and selecting a track is a comparison.
+        times = stack.sizes["time"]
+        stack = stack.assign_coords(track=("time", [key.track] * times),
+                                    direction=("time", [key.direction] * times))
+        mosaicked[key.epsg].append(stack)
+        log.info("%s: %d times, %d by %d cells, %d bursts", key, times,
                  stack.sizes["y"], stack.sizes["x"], len(wanted))
 
-    if not stacks:
+    if not mosaicked:
         raise ValueError("nothing overlapped the AOI")
+
+    # One Dataset per zone. Within a zone OPERA's grid is constant, so every pass lands on
+    # it and they differ only in which acquisitions they contribute.
+    stacks = {epsg: _one_zone(group, epsg) for epsg, group in sorted(mosaicked.items())}
+    if len(stacks) > 1:
+        log.info("this AOI spans %d UTM zones, %s, which cannot share a grid. Pass "
+                 "reproject_to to put them on one.", len(stacks), sorted(stacks))
+    if reproject_to is not None:
+        return _onto_one_crs(stacks, reproject_to)
     return stacks
+
+
+def _one_zone(passes, epsg):
+    """Every pass of one zone as a single Dataset, concatenated in time.
+
+    They are already on the same grid, so join="exact" is a check rather than a
+    constraint: anything else means a pass was built on a different lattice.
+    """
+    stack = xr.concat(passes, dim="time", join="exact", combine_attrs="drop_conflicts")
+    stack = stack.sortby("time")
+
+    stack.attrs.update(
+        epsg=epsg,
+        tracks=sorted({int(t) for t in np.unique(stack.track.values)}),
+        bursts=sum(p.attrs.get("bursts", 1) for p in passes),
+        burst_id=", ".join(sorted({b for p in passes for b in p.attrs["burst_id"].split(", ")})),
+        granules="\n".join(sorted({g for p in passes
+                                   for g in p.attrs.get("granules", "").split("\n") if g})),
+        created=datetime.now(UTC).isoformat(timespec="seconds"),
+        opera_fetch_version=const.__version__,
+    )
+    log.info("EPSG:%d: %d acquisitions over tracks %s on one %d by %d grid", epsg,
+             stack.sizes["time"], stack.attrs["tracks"], stack.sizes["y"], stack.sizes["x"])
+    return stack
+
+
+def _onto_one_crs(stacks, crs):
+    """Every zone resampled onto one grid, as a single Dataset.
+
+    The only resampling in the package, and the caller has to ask for it by name. The
+    reference is the zone with the most acquisitions, so the largest part of the result is
+    still on a grid OPERA delivered. Nearest neighbour throughout: it moves values without
+    inventing any, and the mask is categorical so nothing else would do.
+    """
+    from rasterio.enums import Resampling
+
+    target = CRS.from_user_input(crs)
+    reference = max(stacks.values(), key=lambda s: s.sizes["time"])
+    if CRS.from_user_input(reference.rio.crs) != target:
+        reference = reference.rio.reproject(target, resampling=Resampling.nearest)
+
+    moved = []
+    for epsg, stack in sorted(stacks.items()):
+        if CRS.from_user_input(stack.rio.crs) == CRS.from_user_input(reference.rio.crs):
+            moved.append(stack)
+            continue
+        log.warning("resampling EPSG:%d onto %s, which is the one place this package "
+                    "moves a value", epsg, target.to_string())
+        moved.append(_declare_mask_nodata(stack).rio.reproject_match(
+            reference, resampling=Resampling.nearest))
+
+    joined = xr.concat(moved, dim="time", join="outer").sortby("time")
+
+    # Reprojecting floats a mask wherever a cell has no source, and a class code is not a
+    # float. Those cells are no observation, which the mask already has a code for.
+    product = joined.attrs.get("product", const.RTC)
+    for name in joined.data_vars:
+        if name.endswith("mask") and joined[name].dtype.kind == "f":
+            joined[name] = (joined[name].fillna(const.MASK_NODATA[product])
+                            .astype(const.MASK_DTYPE[product]))
+
+    joined.attrs = dict(reference.attrs)
+    joined.attrs.update(epsg=target.to_epsg(), reprojected_from=sorted(stacks))
+    return joined
+
+
+def _declare_mask_nodata(stack):
+    """Tell rasterio which mask code means no observation, before it guesses.
+
+    Left unsaid, GDAL sees the fill value in the data, decides it must not be mistaken for
+    nodata, and rewrites it: 255 came out as 254, a code OPERA does not define.
+    """
+    product = stack.attrs.get("product", const.RTC)
+    stack = stack.copy()
+    for name in stack.data_vars:
+        if name.endswith("mask"):
+            stack[name] = stack[name].rio.write_nodata(const.MASK_NODATA[product])
+    return stack
 
 
 def _overlapping(bursts, geometry):

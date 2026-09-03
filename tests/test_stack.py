@@ -1,7 +1,8 @@
+import numpy as np
 import pandas as pd
 from tests.conftest import make_burst
 
-from opera_fetch.stack import Pass, align_passes, group_paths
+from opera_fetch.stack import Pass, _one_zone, align_passes, group_paths
 
 RTC = "OPERA_L2_RTC-S1_T049-103327-IW3_20241004T011054Z_20241004T043235Z_S1A_30_v1.0_VV.tif"
 CSLC = "OPERA_L2_CSLC-S1_T049-103327-IW3_20241004T011054Z_20241005T000000Z_S1A_VV_v1.1.h5"
@@ -111,3 +112,77 @@ def test_an_aoi_and_bounds_together_are_refused():
         assemble(["OPERA_L2_RTC-S1_T049-103327-IW3_20241004T011054Z_"
                   "20241004T043235Z_S1A_30_v1.0_VV.tif"],
                  aoi=(-107.0, 38.8, -106.9, 38.9), bounds=(0, 0, 1, 1))
+
+
+def _zone_bursts():
+    """Two tracks in one zone, and one in another: what a boundary AOI looks like."""
+    a = make_burst(west=500_010, north=4_332_210, track=49, direction="ASCENDING")
+    b = make_burst(west=500_010, north=4_332_210, track=56, direction="DESCENDING")
+    b = b.assign_coords(time=b.indexes["time"] + pd.Timedelta("6h"))
+    b.attrs.update(track=56, direction="DESCENDING", burst_id="T056-118980-IW2")
+    return a, b
+
+
+def test_tracks_in_one_zone_share_one_dataset():
+    """OPERA's grid is constant within a zone, so a track is not a reason to split."""
+    from opera_fetch.mosaic import mosaic
+
+    a, b = _zone_bursts()
+    zone = _one_zone([_stamped(mosaic([a]), 49, "ASCENDING"),
+                      _stamped(mosaic([b]), 56, "DESCENDING")], 32612)
+
+    assert zone.sizes["time"] == a.sizes["time"] + b.sizes["time"], "no padding"
+    assert sorted(int(t) for t in np.unique(zone.track.values)) == [49, 56]
+    assert zone.indexes["time"].is_monotonic_increasing
+    # Selecting a track is a comparison on the time axis, not a dictionary lookup.
+    assert zone.sel(time=zone.track == 56).sizes["time"] == b.sizes["time"]
+
+
+def test_a_zone_records_every_track_it_holds():
+    from opera_fetch.mosaic import mosaic
+
+    a, b = _zone_bursts()
+    zone = _one_zone([_stamped(mosaic([a]), 49, "ASCENDING"),
+                      _stamped(mosaic([b]), 56, "DESCENDING")], 32612)
+    assert zone.attrs["tracks"] == [49, 56]
+    assert zone.attrs["epsg"] == 32612
+
+
+def _stamped(stack, track, direction):
+    """What assemble puts on a pass before the zone concatenates them."""
+    times = stack.sizes["time"]
+    return stack.assign_coords(track=("time", [track] * times),
+                               direction=("time", [direction] * times))
+
+
+def test_reproject_to_gives_one_dataset_and_says_so(caplog):
+    """The only resampling in the package, so it has to be asked for and has to be loud."""
+    import logging
+
+    from opera_fetch.stack import _onto_one_crs
+
+    a = make_burst(west=500_010, north=4_332_210, epsg=32612)
+    b = make_burst(west=500_010, north=4_332_210, epsg=32613)
+    for stack, track in ((a, 49), (b, 56)):
+        stack.coords["track"] = ("time", [track] * stack.sizes["time"])
+
+    with caplog.at_level(logging.WARNING, logger="opera_fetch.stack"):
+        joined = _onto_one_crs({32612: a, 32613: b}, "EPSG:32613")
+
+    assert not isinstance(joined, dict), "one CRS means one Dataset"
+    assert joined.rio.crs.to_epsg() == 32613
+    assert joined.attrs["reprojected_from"] == [32612, 32613]
+    assert "moves a value" in caplog.text
+
+
+def test_reprojection_does_not_invent_a_mask_code():
+    """Untold which code is nodata, GDAL rewrote 255 to 254, which OPERA does not define."""
+    from opera_fetch.stack import _onto_one_crs
+
+    a = make_burst(west=500_010, north=4_332_210, epsg=32612)
+    b = make_burst(west=500_010, north=4_332_210, epsg=32613)
+    a["mask"][:] = 255
+
+    joined = _onto_one_crs({32612: a, 32613: b}, "EPSG:32613")
+    codes = set(np.unique(joined.mask.values).tolist())
+    assert codes <= {0, 1, 2, 3, 255}, codes

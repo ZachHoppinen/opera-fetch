@@ -20,11 +20,11 @@ def main():
                              cache_dir="data/raw/east_river",
                              out="data/processed/east_river.nc")
 
-    # One entry per track, pass direction and UTM zone.
+    # One entry per UTM zone; usually one, two when the AOI straddles a boundary.
     for key, stack in stacks.items():
-        print(f"\n=== {key}")
+        print(f"\n=== EPSG:{key}")
         print(of.summary(stack, aoi=AOI))
-        of.quicklook(stack, f"figures/east_river/{key.track:03d}_{key.direction.lower()}.png")
+        of.quicklook(stack, f"figures/east_river/epsg{key}.png")
 
 
 if __name__ == "__main__":
