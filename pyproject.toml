@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=64", "setuptools_scm[toml]>=8"]
+requires = ["setuptools>=77", "setuptools_scm[toml]>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,8 +8,22 @@ dynamic = ["version"]
 description = "OPERA Sentinel-1 RTC and CSLC for an area and a date range, on OPERA's own grid"
 readme = "README.md"
 requires-python = ">=3.11"
-license = {text = "BSD-3-Clause"}
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
 authors = [{name = "Zach Hoppinen", email = "zachhoppinen@gmail.com"}]
+keywords = ["OPERA", "Sentinel-1", "SAR", "RTC", "CSLC", "InSAR", "ASF", "remote sensing"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: GIS",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
 dependencies = [
     "asf_search",
     "dask",
@@ -28,6 +42,8 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/ZachHoppinen/opera-fetch"
+Repository = "https://github.com/ZachHoppinen/opera-fetch"
+Issues = "https://github.com/ZachHoppinen/opera-fetch/issues"
 
 [project.optional-dependencies]
 # Reading an AOI from a shapefile or GeoJSON. A GeoDataFrame you already hold works
