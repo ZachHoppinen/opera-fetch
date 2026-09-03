@@ -41,13 +41,24 @@ SITES = {
 }
 
 
-@pytest.fixture(scope="module")
-def week():
-    """A generator stable within an ISO week, and its seed."""
-    seed = os.environ.get("OPERA_FETCH_SEED")
+def week_seed():
+    """This week's seed, or whatever OPERA_FETCH_SEED names.
+
+    "or None", not just get(): a workflow_dispatch with no seed, and every scheduled run,
+    set the variable to the empty string. Taken as a seed, that pins every run to the same
+    area forever, which is the thing seeding on the week exists to avoid.
+    """
+    seed = os.environ.get("OPERA_FETCH_SEED") or None
     if seed is None:
         year, number, _ = datetime.now(UTC).isocalendar()
         seed = f"{year}-W{number:02d}"
+    return seed
+
+
+@pytest.fixture(scope="module")
+def week():
+    """A generator stable within an ISO week, and its seed."""
+    seed = week_seed()
     print(f"\nweek seed: {seed}  (replay with OPERA_FETCH_SEED={seed})")
     return random.Random(seed), seed
 
