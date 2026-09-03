@@ -1,0 +1,32 @@
+name: opera-fetch
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - asf_search
+  - dask
+  - geopandas
+  - h5netcdf
+  - h5py
+  - matplotlib
+  - netcdf4
+  - numpy
+  - pandas
+  - pyproj
+  - rasterio
+  - rioxarray
+  - requests
+  - shapely
+  - tqdm
+  - xarray
+  - zarr
+  # Development and CI: the workflows invoke all four.
+  - pytest
+  - ruff
+  - python-build
+  - twine
+  - pip
+  - pip:
+      # Editable, and setuptools-scm reads the version from git, so a checkout
+      # needs its full history for this to resolve.
+      - -e .

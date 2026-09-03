@@ -1,0 +1,90 @@
+name: Weekly regression
+
+on:
+  schedule:
+    # Mondays, 09:41 UTC. Off the hour so it is not queued behind the crowd.
+    - cron: "41 9 * * 1"
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: "Replay a week, e.g. 2026-W36. Blank uses the current week."
+        required: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    # A hung transfer would otherwise sit on the 6h runner ceiling.
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash -l {0}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-file: environment.yml
+          # Deliberately not cached, unlike ci.yml: solving fresh every week is how
+          # this job notices a dependency release that breaks us.
+          cache-environment: false
+
+      - name: Write Earthdata credentials
+        env:
+          EARTHDATA_USERNAME: ${{ secrets.EARTHDATA_USERNAME }}
+          EARTHDATA_PASSWORD: ${{ secrets.EARTHDATA_PASSWORD }}
+        run: |
+          if [ -z "$EARTHDATA_USERNAME" ]; then
+            echo "No EARTHDATA_USERNAME secret set; the download tests will fail on 403."
+            exit 0
+          fi
+          printf 'machine urs.earthdata.nasa.gov login %s password %s\n' \
+            "$EARTHDATA_USERNAME" "$EARTHDATA_PASSWORD" > ~/.netrc
+          chmod 600 ~/.netrc
+
+      - name: Live product tests
+        # -s so the week seed and the area it chose land in the run log even on a
+        # pass, which is what makes a failure replayable.
+        env:
+          OPERA_FETCH_SEED: ${{ github.event.inputs.seed }}
+        run: pytest -v -s -m network
+
+      - name: Report failure
+        # A job that exceeds timeout-minutes reports as cancelled, not failed, so
+        # failure() alone would let a hang pass silently.
+        if: failure() || cancelled()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          gh label create weekly-regression --color B60205 \
+            --description "Weekly live-product regression run failed" --force
+          existing=$(gh issue list --label weekly-regression --state open \
+            --limit 1 --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            # Assigning is what notifies: an unassigned bot issue reaches nobody.
+            gh issue edit "$existing" --add-assignee "$OWNER"
+            gh issue comment "$existing" \
+              --body "@$OWNER did not pass again on $(date -u +%Y-%m-%d): $run_url"
+          else
+            gh issue create --label weekly-regression \
+              --assignee "$OWNER" \
+              --title "Weekly regression failed" \
+              --body "@$OWNER the weekly live-product run did not pass: $run_url
+
+          A run that times out reports as cancelled rather than failed.
+
+          The area and window are drawn from a seed printed at the top of the run
+          log. Replay it with the seed input on workflow_dispatch.
+
+          Most likely causes, in rough order: an ASF or CMR API change, an OPERA
+          filename convention change, a new product version with a different layout,
+          a polarization we do not read, or a dependency release."
+          fi

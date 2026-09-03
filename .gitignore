@@ -1,0 +1,14 @@
+__pycache__/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# Downloads and anything a script made. Raw granules are big and come back from ASF.
+data/
+figures/
+logs_*.txt
+
+# One-off analyses worth keeping on this machine but not in the history.
+scratch/

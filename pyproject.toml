@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=64", "setuptools_scm[toml]>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "opera-fetch"
+dynamic = ["version"]
+description = "OPERA Sentinel-1 RTC and CSLC for an area and a date range, on OPERA's own grid"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "BSD-3-Clause"}
+authors = [{name = "Zach Hoppinen", email = "zachhoppinen@gmail.com"}]
+dependencies = [
+    "asf_search",
+    "dask",
+    "geopandas",
+    "h5netcdf",
+    "h5py",
+    "numpy",
+    "pandas",
+    "pyproj",
+    "rasterio",
+    "rioxarray",
+    "requests",
+    "shapely",
+    "tqdm",
+    "xarray",
+]
+
+[project.urls]
+Homepage = "https://github.com/ZachHoppinen/opera-fetch"
+
+[project.optional-dependencies]
+develop = ["pytest", "matplotlib", "zarr", "ruff", "build", "twine"]
+
+[tool.setuptools_scm]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "network: hits ASF for real. Deselect with -m 'not network'.",
+    "data: needs OPERA granules on this machine, and skips itself when they are absent.",
+]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]

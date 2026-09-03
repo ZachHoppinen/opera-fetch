@@ -1,0 +1,37 @@
+name: Publish to PyPI
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+
+    permissions:
+      # Trusted publishing, so there is no API token to keep anywhere.
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history and tags: setuptools-scm reads the version off the tag.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: pip install build twine
+
+      - name: Build package
+        run: python -m build
+
+      - name: Check package
+        # A bad README renders as a blank PyPI page, which cannot be re-uploaded.
+        run: twine check dist/*
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
