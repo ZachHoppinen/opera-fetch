@@ -115,9 +115,23 @@ Interpolating on the fine grid is worse than reading it, which is not obvious un
 measured: the 2x row is held back by GDAL filtering a second time as it decimates, and that
 costs more than it saves. Eight is where the curve flattens.
 
-The transform costs the square of the factor, so a scene too large for eight takes four or
-two, and a very large one is warned about and resampled directly.
-`scratch/oversample_before_reprojecting.py` reproduces the table.
+**It reprojects the area you asked for, one acquisition at a time, not whole bursts**, so
+the memory is knowable before anything runs. A whole CSLC burst is 4842 by 18648, which is
+722 MB and would want 46 GB to oversample; the same burst clipped to a small AOI is 4 MB
+and wants about 800 MB. The grid follows from the area and the product's posting, so:
+
+```
+peak bytes  ~=  cells * 8 * factor^2 * 3
+```
+
+The 3 is measured, not assumed: the wide array, the transform's output, and one temporary
+inside it. Estimating the wide array alone was out by three, which made the budget guard
+allow four times what it thought.
+
+The factor gives way rather than the machine taking the hit: a scene too large for eight
+takes four or two, and a very large one is warned about and resampled directly. Each scene
+logs what it is about to cost. `scratch/oversample_before_reprojecting.py` reproduces the
+coherence table.
 
 ### What it refuses
 

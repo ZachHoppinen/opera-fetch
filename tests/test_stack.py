@@ -229,7 +229,9 @@ def test_the_oversampling_factor_gives_way_on_a_big_scene():
     small = make_burst(west=500_010, north=4_332_210, columns=64, rows=64)
     assert resample.affordable_factor(small.vv) == resample.FACTOR
     assert resample.affordable_factor(small.vv, budget=1_000) == 1
-    assert resample.affordable_factor(small.vv, budget=small.vv.nbytes * 16) == 4
+    # The budget is spent against the real peak, which is three times the wide array.
+    assert resample.affordable_factor(
+        small.vv, budget=small.vv.nbytes * 16 * resample.OVERHEAD) == 4
 
 
 def test_oversampling_reproduces_the_samples_it_started_from():
@@ -290,3 +292,31 @@ def two_complex_bursts():
         stack.coords["platform"] = ("time", ["S1A"] * stack.sizes["time"])
         stack.coords["track"] = ("time", np.full(stack.sizes["time"], 49, dtype="int64"))
     return a, b
+
+
+def test_the_memory_estimate_is_the_one_the_budget_uses():
+    """It is knowable before anything runs: the grid comes from the area asked for."""
+    from opera_fetch import resample
+
+    scene = make_burst(west=500_010, north=4_332_210, columns=64, rows=64).vv.isel(time=0)
+    # Three times the wide array, not one: the transform leaves temporaries behind.
+    assert resample.peak_bytes(scene, 8) == scene.nbytes * 64 * resample.OVERHEAD
+
+    # And the budget is spent against that estimate, not against the naive one.
+    budget = scene.nbytes * 64 * resample.OVERHEAD
+    assert resample.affordable_factor(scene, budget=budget) == 8
+    assert resample.affordable_factor(scene, budget=budget - 1) == 4
+
+
+def test_oversampling_handles_an_odd_number_of_samples():
+    """Splitting the spectrum at n//2 would drop a row of an odd sized scene."""
+    from opera_fetch import resample
+
+    rng = np.random.default_rng(0)
+    values = (rng.random((31, 33)) + 1j * rng.random((31, 33))).astype("complex64")
+    coarse = make_burst(west=500_010, north=4_332_210, columns=33, rows=31).vv.isel(time=0)
+    coarse = coarse.copy(data=values)
+
+    fine = resample.oversample(coarse, 4)
+    assert fine.shape == (124, 132)
+    assert np.allclose(fine.values[::4, ::4], values, atol=1e-4)

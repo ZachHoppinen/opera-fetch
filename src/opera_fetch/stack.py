@@ -379,7 +379,8 @@ def _oversampled_reproject(field, reference):
 
         # Nearest on the fine grid, not the caller's kernel: the oversampling has already
         # done the interpolation exactly, and filtering again is what costs coherence.
-        log.debug("oversampling %s %dx before reprojecting it", field.name, factor)
+        log.info("oversampling %s %dx before reprojecting, about %.0f MB for this scene",
+                 field.name, factor, resample.peak_bytes(scene, factor) / 1e6)
         fine = resample.oversample(scene, factor).rio.reproject_match(
             reference, resampling=Resampling.nearest)
 

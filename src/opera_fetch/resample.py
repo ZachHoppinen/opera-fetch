@@ -40,6 +40,10 @@ FACTOR = 8
 # scene too large for eight still gets four or two, and only a very large one gets none.
 BUDGET = 2_000_000_000
 
+# What it really peaks at, measured rather than assumed: the wide array, the transform's
+# output, and one temporary inside it. Estimating the wide array alone was out by three.
+OVERHEAD = 3
+
 
 def oversample(field, factor=FACTOR):
     """One complex 2-D layer on a grid `factor` times finer, by zero padding its spectrum.
@@ -48,33 +52,65 @@ def oversample(field, factor=FACTOR):
     worth doing rather than interpolating twice: the fine samples that coincide with coarse
     ones reproduce them to float precision.
 
-    Nodata is filled with zero for the transform, since a NaN would take the whole spectrum
-    with it, and the caller is expected to put the gaps back afterwards.
+    Nodata is filled with zero for the transform, since one NaN would take the whole
+    spectrum with it, and the caller is expected to put the gaps back afterwards.
     """
     dy = float(field.y[1] - field.y[0])
     dx = float(field.x[1] - field.x[0])
     values = np.asarray(field.values)
-    valid = np.isfinite(values)
-
-    padded = np.fft.fftshift(np.fft.fft2(np.where(valid, values, 0)))
-    ny, nx = values.shape
-    pad_y, pad_x = (factor * ny - ny) // 2, (factor * nx - nx) // 2
-    wide = np.pad(padded, ((pad_y, pad_y), (pad_x, pad_x)))
-    fine = np.fft.ifft2(np.fft.ifftshift(wide)) * factor ** 2
+    fine = _pad_spectrum(np.where(np.isfinite(values), values, 0), factor)
 
     coords = {
         "y": float(field.y[0]) + np.arange(fine.shape[0]) * dy / factor,
         "x": float(field.x[0]) + np.arange(fine.shape[1]) * dx / factor,
     }
-    out = xr.DataArray(fine.astype(values.dtype), dims=("y", "x"), coords=coords,
-                       name=field.name)
+    out = xr.DataArray(fine.astype(values.dtype, copy=False), dims=("y", "x"),
+                       coords=coords, name=field.name)
     return out.rio.write_crs(field.rio.crs)
+
+
+def _pad_spectrum(values, factor):
+    """Zero pad an unshifted spectrum by moving its four quadrants to the corners.
+
+    The same thing as fftshift, pad, ifftshift, and a quarter less memory: those three
+    each leave a copy of the wide array behind, and the wide array is the expensive one.
+    """
+    ny, nx = values.shape
+    spectrum = np.fft.fft2(values)
+    wide = np.zeros((factor * ny, factor * nx), dtype=spectrum.dtype)
+
+    # The low half of each axis holds DC and the positive frequencies, the high half the
+    # negative ones, and the zeros go between them where the signal has no content.
+    low_y, low_x = (ny + 1) // 2, (nx + 1) // 2
+    high_y, high_x = ny - low_y, nx - low_x
+    wide[:low_y, :low_x] = spectrum[:low_y, :low_x]
+    if high_x:
+        wide[:low_y, -high_x:] = spectrum[:low_y, low_x:]
+    if high_y:
+        wide[-high_y:, :low_x] = spectrum[low_y:, :low_x]
+    if high_y and high_x:
+        wide[-high_y:, -high_x:] = spectrum[low_y:, low_x:]
+
+    del spectrum
+    fine = np.fft.ifft2(wide)
+    fine *= factor ** 2
+    return fine
+
+
+def peak_bytes(field, factor=FACTOR):
+    """Roughly what oversampling this scene will peak at.
+
+    Knowable before anything runs: the grid comes from the area asked for and the product's
+    posting, so a 500 by 900 CSLC scene is 4 MB and costs about 800 MB to oversample eight
+    times over.
+    """
+    return field.nbytes * factor ** 2 * OVERHEAD
 
 
 def affordable_factor(field, budget=BUDGET):
     """The largest oversampling this scene can afford, or 1 if even the smallest is too much."""
     for factor in (FACTOR, 4, 2):
-        if field.nbytes * factor ** 2 <= budget:
+        if peak_bytes(field, factor) <= budget:
             return factor
     return 1
 
