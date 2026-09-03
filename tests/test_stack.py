@@ -210,13 +210,31 @@ def test_complex_survives_being_reprojected():
     assert np.any(finite.imag != 0), "the imaginary part was dropped somewhere"
 
 
-def test_complex_refuses_any_resampling_but_nearest():
+def test_complex_refuses_a_kernel_that_discards_the_phase():
+    """rms reduces each window to a magnitude. Measured phase error 1.95 radians."""
     import pytest
 
     from opera_fetch.stack import _onto_one_crs
 
-    with pytest.raises(ValueError, match="averages their phases"):
-        _onto_one_crs(_complex_zones(), "EPSG:32613", resampling="bilinear")
+    with pytest.raises(ValueError, match="does not carry a phase"):
+        _onto_one_crs(_complex_zones(), "EPSG:32613", resampling="rms")
+
+
+def test_complex_defaults_to_a_windowed_sinc():
+    """nearest does not interpolate, so it leaves a sub-pixel shift unapplied as a phase
+    error. OPERA geocodes complex data with a sinc for the same reason."""
+    from opera_fetch import constants as const
+
+    assert const.DEFAULT_RESAMPLING["complex"] == "lanczos"
+    assert const.DEFAULT_RESAMPLING["real"] == "nearest"
+    assert const.DEFAULT_RESAMPLING["mask"] == "nearest"
+
+
+def test_an_interpolating_kernel_is_allowed_on_complex():
+    from opera_fetch.stack import _onto_one_crs
+
+    joined = _onto_one_crs(_complex_zones(), "EPSG:32613", resampling="bilinear")
+    assert np.issubdtype(joined.vv.dtype, np.complexfloating)
 
 
 def test_the_mask_moves_by_nearest_whatever_the_data_does():

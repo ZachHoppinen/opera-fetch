@@ -88,21 +88,33 @@ stacks = of.fetch_stacks(aoi, start, end, reproject_to="EPSG:32613")   # one Dat
 by name. It moves the smaller zone onto the larger one's grid, so the larger part of the
 result is still on a grid OPERA delivered.
 
-It resamples with **nearest** by default, which moves a value without inventing one.
-`resampling=` takes any name from `rasterio.enums.Resampling` if you would rather have
-something smoother for backscatter:
+The kernel depends on what the numbers mean, so the default does too:
 
-```python
-of.fetch_stacks(aoi, start, end, reproject_to="EPSG:32613", resampling="bilinear")
-```
+| data | default | why |
+|---|---|---|
+| complex, CSLC | `lanczos` | a windowed sinc, the family OPERA geocodes complex with |
+| real, RTC | `nearest` | moves values without inventing any |
+| a mask | `nearest`, always | an interpolated class code is a code nobody observed |
 
-Two things it will not let you do. **Complex data is nearest only.** Interpolating the real
-and imaginary parts of two pixels a fringe apart gives a number that is not a phase either
-of them had, so asking for anything else on a CSLC stack is an error rather than a quiet
-loss. Take the amplitude first if you want a smooth result.
+`resampling=` overrides it with any name from `rasterio.enums.Resampling`.
 
-And **the mask always moves by nearest**, whatever the data does, because an interpolated
-class code is a code nobody observed.
+**Nearest is the wrong default for complex data**, which is worth stating because it is
+tempting. It does not interpolate, so it leaves a sub-pixel shift unapplied, and that
+unapplied shift is a phase error. Measured against an exact half-pixel shift of a fringe at
+0.1 cycles per pixel:
+
+| kernel | amplitude kept | phase error |
+|---|---|---|
+| `lanczos` | 1.003 | 0.000 |
+| `cubic` | 0.996 | 0.000 |
+| `bilinear` | 0.951 | 0.000 |
+| `nearest` | 1.000 | **0.314**, the whole shift |
+| `rms` | 1.000 | **1.950** |
+
+The interpolating kernels all reproduce the shift exactly and differ only in how much
+amplitude they keep, which is why the default is the one that keeps the most. `rms` and
+`mode` are refused on complex data: they reduce a window to a magnitude, so there is no
+phase left to move.
 
 **Neighbouring bursts are acquired seconds apart.** That is enough to make every burst's
 time axis unique, and a mosaic of them an empty diagonal ribbon. `align_passes` collapses

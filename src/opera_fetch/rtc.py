@@ -113,7 +113,7 @@ def _granules(paths):
         raise ValueError(f"paths span {len(bursts)} bursts: {sorted(bursts)}. Group them first")
     return dict(granules)
 
-
+#TODO call identifify to match CSLC format?
 def _describe(stack, tags, granules):
     """Carry the burst's identity, and the units of its values, onto the stack."""
     stack.attrs = {

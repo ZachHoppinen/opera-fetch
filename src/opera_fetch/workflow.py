@@ -23,7 +23,7 @@ def fetch_stacks(aoi, start=None, end=None, product=const.RTC, cache_dir="data/r
                  aoi_crs=None, static=True, layers=None, static_layers=None, track=None,
                  direction=None, out=None, mask=False, how=None, tolerance=TOLERANCE,
                  chunks=None, extra=(), max_workers=10, reproject_to=None,
-                 resampling="nearest"):
+                 resampling=None):
     """Search, download, mosaic, stack, clip and check. One Dataset per pass.
 
     Parameters
@@ -72,7 +72,9 @@ def fetch_stacks(aoi, start=None, end=None, product=const.RTC, cache_dir="data/r
         resampling in the package, which is why it has to be asked for by name.
     resampling
         How that reprojection interpolates: any name from ``rasterio.enums.Resampling``.
-        Nearest by default, and the only one allowed for complex data.
+        Defaults to ``"lanczos"`` for complex data, which reproduces a sub-pixel shift of a
+        fringe exactly, and ``"nearest"`` for real, which moves values without inventing
+        any. A mask is categorical and moves by nearest either way.
 
     Returns
     -------

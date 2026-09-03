@@ -123,7 +123,7 @@ def align_passes(bursts, tolerance=TOLERANCE):
 
 
 def assemble(paths, aoi=None, aoi_crs=None, bounds=None, how=None, tolerance=TOLERANCE,
-             chunks=None, extra=(), mask=False, reproject_to=None, resampling="nearest"):
+             chunks=None, extra=(), mask=False, reproject_to=None, resampling=None):
     """Read, mosaic and stack every burst among the given files, one Dataset per pass.
 
     Parameters
@@ -155,8 +155,8 @@ def assemble(paths, aoi=None, aoi_crs=None, bounds=None, how=None, tolerance=TOL
         This is the only resampling the package does, which is why it has to be asked for.
     resampling
         How that reprojection interpolates: any name from ``rasterio.enums.Resampling``.
-        Nearest by default, and the only one allowed for complex data, where averaging
-        neighbours averages their phases.
+        Defaults to ``"lanczos"`` for complex data and ``"nearest"`` for real. A mask is
+        categorical and moves by nearest either way.
 
     Returns
     -------
@@ -287,29 +287,35 @@ def _all_equal(layers):
     return all(np.array_equal(first, other.values, equal_nan=True) for other in layers[1:])
 
 
-def _onto_one_crs(stacks, crs, resampling="nearest"):
+def _onto_one_crs(stacks, crs, resampling=None):
     """Every zone resampled onto one grid, as a single Dataset.
 
     The only resampling in the package, and the caller has to ask for it by name. The
     reference is the zone with the most acquisitions, so the largest part of the result is
     still on a grid OPERA delivered.
 
-    Nearest by default, which moves values without inventing any. Anything else averages
-    neighbours, and for complex data that destroys the measurement: interpolating the real
-    and imaginary parts of two pixels a fringe apart gives a number that is not a phase
-    either of them had. So a complex stack takes nearest and nothing else.
+    The kernel depends on what the numbers mean, so the default does too. Complex data gets
+    lanczos, a windowed sinc, which is the family OPERA's own geocoding uses for it: it
+    reproduces a sub-pixel shift of a fringe exactly, where nearest does not interpolate at
+    all and so leaves the shift unapplied as a phase error. Real data keeps nearest, which
+    moves values without inventing any.
     """
     from rasterio.enums import Resampling
 
     complex_data = any(np.issubdtype(stack[name].dtype, np.complexfloating)
                        for stack in stacks.values() for name in stack.data_vars)
-    if complex_data and resampling != "nearest":
+    kind = "complex" if complex_data else "real"
+    resampling = resampling or const.DEFAULT_RESAMPLING[kind]
+
+    if complex_data and resampling in const.NO_PHASE:
         raise ValueError(
-            f"complex data can only be reprojected with nearest, not {resampling!r}: "
-            "averaging neighbouring pixels averages their phases, which is not a phase "
-            "anything measured. Take the amplitude first if you want a smooth result.")
+            f"{resampling!r} does not carry a phase, so it cannot resample complex data: "
+            "it reduces each window to a magnitude. Take the amplitude first if that is "
+            f"what you want, or use one of the interpolating kernels such as "
+            f"{const.DEFAULT_RESAMPLING['complex']!r}.")
 
     how = Resampling[resampling]
+    log.info("reprojecting %s data with %s", kind, resampling)
     target = CRS.from_user_input(crs)
     reference = max(stacks.values(), key=lambda s: s.sizes["time"])
     if CRS.from_user_input(reference.rio.crs) != target:

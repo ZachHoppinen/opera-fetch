@@ -158,7 +158,7 @@ def _shared_attrs(bursts):
     attrs["granules"] = "\n".join(g for g in granules if g)
     return attrs
 
-
+#TODO do we need to keep this for some reason?
 def _one_pass(bursts):
     """Refuse to mosaic across a boundary a mosaic has no business crossing.
 
