@@ -154,9 +154,10 @@ def assemble(paths, aoi=None, aoi_crs=None, bounds=None, how=None, tolerance=TOL
         A CRS to put every zone on, returning a single Dataset instead of one per zone.
         This is the only resampling the package does, which is why it has to be asked for.
     resampling
-        How that reprojection interpolates: any name from ``rasterio.enums.Resampling``.
-        Defaults to ``"lanczos"`` for complex data and ``"nearest"`` for real. A mask is
-        categorical and moves by nearest either way.
+        How the real layers are interpolated: any name from ``rasterio.enums.Resampling``,
+        nearest by default. A mask is categorical and always moves by nearest. A complex
+        layer takes neither: it is oversampled first and then read at nearest, which is
+        the only way to move one without giving up coherence.
 
     Returns
     -------
@@ -302,20 +303,7 @@ def _onto_one_crs(stacks, crs, resampling=None):
     """
     from rasterio.enums import Resampling
 
-    complex_data = any(np.issubdtype(stack[name].dtype, np.complexfloating)
-                       for stack in stacks.values() for name in stack.data_vars)
-    kind = "complex" if complex_data else "real"
-    resampling = resampling or const.DEFAULT_RESAMPLING[kind]
-
-    if complex_data and resampling in const.NO_PHASE:
-        raise ValueError(
-            f"{resampling!r} does not carry a phase, so it cannot resample complex data: "
-            "it reduces each window to a magnitude. Take the amplitude first if that is "
-            f"what you want, or use one of the interpolating kernels such as "
-            f"{const.DEFAULT_RESAMPLING['complex']!r}.")
-
-    how = Resampling[resampling]
-    log.info("reprojecting %s data with %s", kind, resampling)
+    how = Resampling[resampling or const.DEFAULT_RESAMPLING["real"]]
     target = CRS.from_user_input(crs)
     reference = max(stacks.values(), key=lambda s: s.sizes["time"])
     if CRS.from_user_input(reference.rio.crs) != target:
@@ -328,13 +316,26 @@ def _onto_one_crs(stacks, crs, resampling=None):
             continue
         log.warning("resampling EPSG:%d onto %s, which is the one place this package "
                     "moves a value", epsg, target.to_string())
-        # The mask is categorical, so it moves by nearest whatever the data does.
+        # Three kinds of layer, three ways of moving them. A mask is categorical, so it
+        # goes by nearest. A complex layer is oversampled first, which is the only way to
+        # move it without giving up coherence. Everything else takes the caller's kernel.
         masks = [name for name in stack.data_vars if name.endswith("mask")]
+        complex_layers = [name for name in stack.data_vars
+                          if np.issubdtype(stack[name].dtype, np.complexfloating)]
         ready = _declare_mask_nodata(stack)
-        matched = ready.drop_vars(masks).rio.reproject_match(reference, resampling=how)
+
+        plain = ready.drop_vars(masks + complex_layers)
+        matched = (plain.rio.reproject_match(reference, resampling=how) if plain.data_vars
+                   else ready[[]].rio.reproject_match(reference, resampling=how))
+        log.info("moved %d layer(s) with %s, %d mask(s) with nearest, %d complex "
+                 "oversampled first", len(plain.data_vars), how.name, len(masks),
+                 len(complex_layers))
+
         for name in masks:
             matched[name] = ready[[name]].rio.reproject_match(
                 reference, resampling=Resampling.nearest)[name]
+        for name in complex_layers:
+            matched[name] = _oversampled_reproject(stack[name], reference)
         moved.append(matched)
 
     joined = xr.concat(moved, dim="time", join="outer").sortby("time")
@@ -350,6 +351,47 @@ def _onto_one_crs(stacks, crs, resampling=None):
     joined.attrs = dict(reference.attrs)
     joined.attrs.update(epsg=target.to_epsg(), reprojected_from=sorted(stacks))
     return joined
+
+
+def _oversampled_reproject(field, reference):
+    """One complex layer onto the reference grid, oversampled on the way.
+
+    Done a slice at a time, so the four times the memory the transform costs is four times
+    one scene rather than four times the series.
+    """
+    from rasterio.enums import Resampling
+
+    from opera_fetch import resample
+
+    timed = "time" in field.dims
+    slices = [field.isel(time=i) for i in range(field.sizes["time"])] if timed else [field]
+
+    moved = []
+    for scene in slices:
+        factor = resample.affordable_factor(scene)
+        if factor == 1:
+            log.warning("%s is too large to oversample, so it is resampled directly and "
+                        "gives up some coherence to the kernel", field.name)
+            # lanczos rather than nearest here: without a fine grid to read from, the
+            # widest kernel available is the least bad of the options.
+            moved.append(scene.rio.reproject_match(reference, resampling=Resampling.lanczos))
+            continue
+
+        # Nearest on the fine grid, not the caller's kernel: the oversampling has already
+        # done the interpolation exactly, and filtering again is what costs coherence.
+        log.debug("oversampling %s %dx before reprojecting it", field.name, factor)
+        fine = resample.oversample(scene, factor).rio.reproject_match(
+            reference, resampling=Resampling.nearest)
+
+        # Where the data is travels separately: the transform fills the gaps with zero,
+        # and zero is an ordinary value for a complex scene to hold.
+        was_there = resample.validity(scene).rio.reproject_match(
+            reference, resampling=Resampling.nearest)
+        moved.append(fine.where(was_there > 0))
+
+    if not timed:
+        return moved[0]
+    return xr.concat(moved, dim="time").assign_coords(time=field.time)
 
 
 def _declare_mask_nodata(stack):

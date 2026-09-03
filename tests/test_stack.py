@@ -210,27 +210,46 @@ def test_complex_survives_being_reprojected():
     assert np.any(finite.imag != 0), "the imaginary part was dropped somewhere"
 
 
-def test_complex_refuses_a_kernel_that_discards_the_phase():
-    """rms reduces each window to a magnitude. Measured phase error 1.95 radians."""
-    import pytest
-
+def test_complex_is_oversampled_before_it_is_moved():
+    """Not a kernel choice: resampling a CSLC directly costs coherence whatever the kernel,
+    because speckle fills the band up to Nyquist. Oversampling first is the fix."""
+    from opera_fetch import resample
     from opera_fetch.stack import _onto_one_crs
 
-    with pytest.raises(ValueError, match="does not carry a phase"):
-        _onto_one_crs(_complex_zones(), "EPSG:32613", resampling="rms")
+    joined = _onto_one_crs(_complex_zones(), "EPSG:32613")
+    assert np.issubdtype(joined.vv.dtype, np.complexfloating)
+    assert resample.FACTOR >= 8, "eight is where the coherence curve flattens"
 
 
-def test_complex_defaults_to_a_windowed_sinc():
-    """nearest does not interpolate, so it leaves a sub-pixel shift unapplied as a phase
-    error. OPERA geocodes complex data with a sinc for the same reason."""
-    from opera_fetch import constants as const
+def test_the_oversampling_factor_gives_way_on_a_big_scene():
+    """The transform costs the square of the factor, so a large scene takes a smaller one
+    rather than the machine taking the hit."""
+    from opera_fetch import resample
 
-    assert const.DEFAULT_RESAMPLING["complex"] == "lanczos"
-    assert const.DEFAULT_RESAMPLING["real"] == "nearest"
-    assert const.DEFAULT_RESAMPLING["mask"] == "nearest"
+    small = make_burst(west=500_010, north=4_332_210, columns=64, rows=64)
+    assert resample.affordable_factor(small.vv) == resample.FACTOR
+    assert resample.affordable_factor(small.vv, budget=1_000) == 1
+    assert resample.affordable_factor(small.vv, budget=small.vv.nbytes * 16) == 4
 
 
-def test_an_interpolating_kernel_is_allowed_on_complex():
+def test_oversampling_reproduces_the_samples_it_started_from():
+    """Zero padding the spectrum is exact for a bandlimited signal, which is the whole
+    reason to do it rather than interpolate twice."""
+    from opera_fetch import resample
+
+    rng = np.random.default_rng(0)
+    values = (rng.random((64, 64)) + 1j * rng.random((64, 64))).astype("complex64")
+    coarse = make_burst(west=500_010, north=4_332_210, columns=64, rows=64).vv.isel(time=0)
+    coarse = coarse.copy(data=values)
+
+    fine = resample.oversample(coarse, 4)
+    assert fine.shape == (256, 256)
+    assert np.allclose(fine.values[::4, ::4], values, atol=1e-5)
+    assert float(fine.x[0]) == float(coarse.x[0])
+
+
+def test_the_kernel_choice_applies_to_real_layers():
+    """resampling= is for the real layers. A complex one is oversampled either way."""
     from opera_fetch.stack import _onto_one_crs
 
     joined = _onto_one_crs(_complex_zones(), "EPSG:32613", resampling="bilinear")

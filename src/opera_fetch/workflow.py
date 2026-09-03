@@ -71,10 +71,10 @@ def fetch_stacks(aoi, start=None, end=None, product=const.RTC, cache_dir="data/r
         A CRS to put every zone on, giving one Dataset instead of one per zone. The only
         resampling in the package, which is why it has to be asked for by name.
     resampling
-        How that reprojection interpolates: any name from ``rasterio.enums.Resampling``.
-        Defaults to ``"lanczos"`` for complex data, which reproduces a sub-pixel shift of a
-        fringe exactly, and ``"nearest"`` for real, which moves values without inventing
-        any. A mask is categorical and moves by nearest either way.
+        How the real layers are interpolated: any name from ``rasterio.enums.Resampling``,
+        nearest by default. A mask always moves by nearest, being categorical, and a
+        complex layer is oversampled first and then read at nearest, which is the only way
+        to move one without giving up coherence.
 
     Returns
     -------

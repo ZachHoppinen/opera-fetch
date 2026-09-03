@@ -88,89 +88,36 @@ stacks = of.fetch_stacks(aoi, start, end, reproject_to="EPSG:32613")   # one Dat
 by name. It moves the smaller zone onto the larger one's grid, so the larger part of the
 result is still on a grid OPERA delivered.
 
-The kernel depends on what the numbers mean, so the default does too:
+A mask is categorical, so it always moves by nearest: an interpolated class code is a code
+nobody observed. Real layers take `nearest` by default, which moves values without
+inventing any, and `resampling=` overrides that with any name from
+`rasterio.enums.Resampling`.
 
-| data | default | why |
+**A complex layer takes neither, because a kernel is the wrong tool for it.** A CSLC is
+bandlimited to its own grid, but speckle fills that band right up to Nyquist: half the
+energy of a real burst sits beyond half of Nyquist, exactly where a truncated sinc rolls
+off. So it is oversampled eight times over by zero padding its spectrum, which is the exact
+interpolator for such a signal, and then read at the nearest fine sample. Nearest is right
+as the second step precisely because it filters nothing.
+
+Coherence against the analytic answer, worst case over a range of sub-pixel shifts of real
+CSLC:
+
+| | worst coherence | memory, one 512 by 512 scene |
 |---|---|---|
-| complex, CSLC | `lanczos` | a windowed sinc, the family OPERA geocodes complex with |
-| real, RTC | `nearest` | moves values without inventing any |
-| a mask | `nearest`, always | an interpolated class code is a code nobody observed |
+| `nearest`, no oversampling | 0.638 | 2 MB |
+| `lanczos`, no oversampling | 0.951 | 2 MB |
+| oversample 2x, then `lanczos` | 0.978 | 8 MB |
+| **oversample 8x, then nearest**, what it does | **0.996** | 134 MB |
+| oversample 16x, then nearest | 0.999 | 537 MB |
 
-`resampling=` overrides it with any name from `rasterio.enums.Resampling`.
+Interpolating on the fine grid is worse than reading it, which is not obvious until
+measured: the 2x row is held back by GDAL filtering a second time as it decimates, and that
+costs more than it saves. Eight is where the curve flattens.
 
-**Nearest is the wrong default for complex data**, which is worth stating because it is
-tempting. It does not interpolate, so it leaves a sub-pixel shift unapplied, and that
-unapplied shift is a phase error. Measured against an exact half-pixel shift of a fringe at
-0.1 cycles per pixel:
-
-| kernel | amplitude kept | phase error |
-|---|---|---|
-| `lanczos` | 1.003 | 0.000 |
-| `cubic` | 0.996 | 0.000 |
-| `bilinear` | 0.951 | 0.000 |
-| `nearest` | 1.000 | **0.314**, the whole shift |
-| `rms` | 1.000 | **1.950** |
-
-The interpolating kernels all reproduce the shift exactly and differ only in how much
-amplitude they keep, which is why the default is the one that keeps the most. `rms` and
-`mode` are refused on complex data: they reduce a window to a magnitude, so there is no
-phase left to move.
-
-**Reprojecting a CSLC still costs coherence, and the default path never does it.** Speckle
-fills the band: half the energy of a real burst sits beyond half of Nyquist, exactly where
-a truncated sinc rolls off. Shifting real CSLC rows by half a pixel, against the analytic
-answer:
-
-| | coherence with the exact shift |
-|---|---|
-| no shift at all, as `nearest` does | 0.638 |
-| `lanczos` directly, which is what GDAL gives | 0.951 |
-| oversample 2x first, then `lanczos` | 1.000 |
-
-Oversampling first recovers all of it, because zero padding the spectrum is exact for
-bandlimited data and leaves the signal in the half of the band the kernel handles cleanly.
-This package does not do it: that means an FFT resampler of its own, and the only path that
-resamples a CSLC is `reproject_to`, which is opt in and needed only across a zone boundary,
-where the two halves are different tracks you would not interfere anyway. If you need a
-cross-zone CSLC at full coherence, oversample before reprojecting rather than relying on
-this. `scratch/oversample_before_reprojecting.py` reproduces the table.
-
-**Neighbouring bursts are acquired seconds apart.** That is enough to make every burst's
-time axis unique, and a mosaic of them an empty diagonal ribbon. `align_passes` collapses
-timestamps closer together than a tolerance, 10 minutes by default, into one pass.
-`assemble` does it for you.
-
-**Overlapping bursts are averaged by their looks**, which is how OPERA mosaics its own,
-rather than flat. In practice this changes almost nothing: `number_of_looks` is a function
-of the terrain, and two bursts of one track view the same ground at nearly the same angle,
-so their looks agree to four decimal places over 99.999% of the overlap. It is kept because
-it is the right computation where they do differ, not because it moves the numbers.
-
-Where two bursts disagree on the layover/shadow code the mosaic takes the worse of the two,
-since both fed the averaged value. Averaging the codes themselves would be worse than
-either: shadow (1) and both (3) average to layover (2), a class nobody saw.
-
-**A mosaic's `time` is the earliest burst of that pass**, not each burst's own
-zero-doppler start. Down a track that is a few seconds; it is not the instant any
-particular pixel was measured. For per-burst timing, read the bursts and skip the mosaic:
-
-```python
-bursts = of.read_bursts(paths)      # each keeps its own acquisition times
-```
-
-**Nothing is masked.** Values come out as OPERA delivers them: linear gamma0 for RTC, not
-dB; complex for CSLC, with the phase intact. The layover/shadow mask rides along as its own
-variable rather than being applied, so whether a layover pixel counts stays your decision:
-
-```python
-clear = stack.where(stack.mask == 0)
-```
-
-That line works for either product, but the two masks are not the same thing. OPERA ships
-an RTC mask **per acquisition**, so `mask` there has dims `(time, y, x)`. It ships no CSLC
-mask at all; the only one is in CSLC-STATIC, made **once per burst**, so `mask` there is
-`(y, x)` and broadcasts over time. The codes agree: 0 clear, 1 shadow, 2 layover, 3 both.
-No observation does not: 255 for RTC (uint8) and 127 for CSLC (int8).
+The transform costs the square of the factor, so a scene too large for eight takes four or
+two, and a very large one is warned about and resampled directly.
+`scratch/oversample_before_reprojecting.py` reproduces the table.
 
 ### What it refuses
 

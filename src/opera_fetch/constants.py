@@ -51,16 +51,12 @@ LOOKS = "number_of_looks"
 CSLC_DATA = ("VV", "HH")
 CSLC_STATIC_DATA = ("local_incidence_angle", "layover_shadow_mask", "los_east", "los_north")
 
-# How a reprojection interpolates, when one is asked for. Complex data gets a windowed
-# sinc, which is what OPERA's own geocoding uses for it: measured against an exact
-# half-pixel shift of a fringe, lanczos and bilinear both reproduce the phase exactly while
-# nearest does not interpolate at all, and lanczos keeps the most amplitude. Real data
-# keeps nearest, which moves values without inventing any. A mask is categorical and is
-# always nearest, whatever the data does.
-DEFAULT_RESAMPLING = {"complex": "lanczos", "real": "nearest", "mask": "nearest"}
-
-# rms takes magnitudes, so it throws the phase away rather than moving it.
-NO_PHASE = ("rms", "mode")
+# How a reprojection moves each kind of layer. Real data keeps nearest, which moves values
+# without inventing any, and the caller can choose otherwise. A mask is categorical, so it
+# is nearest whatever the data does. Complex is not a kernel choice at all: it is
+# oversampled first and then taken at nearest, which is the only way to move it without
+# giving up coherence. See opera_fetch.resample.
+DEFAULT_RESAMPLING = {"real": "nearest", "mask": "nearest"}
 
 # Codes and fill values as OPERA defines them: opera-adt/RTC ``h5_prep.py`` for RTC,
 # opera-adt/COMPASS ``s1_geocode_metadata.py`` for CSLC.
