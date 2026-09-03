@@ -25,13 +25,20 @@ This project uses these six steps to get OPERA data for scientific/operational a
 ```python
 import opera_fetch as of
 
-stacks = of.fetch_stacks((-107.0, 38.85, -106.85, 38.95), "2024-11-01", "2024-11-30",
+stacks = of.fetch_stacks((-107.0, 38.85, -106.85, 38.95),
+                         start="2024-11-01", end="2024-11-30",
                          product=of.RTC, cache_dir="data/raw/east_river",
                          out="data/processed/east_river.nc")
 
 for epsg, stack in stacks.items():
     print(f"=== EPSG:{epsg}")
     print(of.summary(stack))
+```
+
+That is `scripts/readme.py`, so it can be run as it stands:
+
+```bash
+conda run -n opera-fetch python scripts/readme.py
 ```
 
 ```
@@ -54,7 +61,7 @@ Two entries because this AOI straddles a UTM zone boundary. Usually there is one
 
 ## Processing choices
 
-**Nothing is resampled.** OPERA delivers every burst on a fixed lattice in the UTM zone it
+**Nothing is resampled by default.** OPERA delivers every burst on a fixed lattice in the UTM zone it
 falls in, so two bursts of one track, and the same burst reprocessed next year, share their
 pixel centres exactly. Mosaicking and clipping are coordinate lookups, so every value that
 comes out is a value that went in. Reprojecting is left to whatever comes next, which is
@@ -64,9 +71,9 @@ The lattice is taken from the OPERA products themselves.
 
 ### Returning a dictionary is how we avoid reprojections
 
-OPERA assigns the UTM zone **per burst**. Over the East River, T049 and T129 arrive as
-EPSG:32612 while T056 and T151 arrive as EPSG:32613. That is the same ground with
-`x = 846675` in one and `x = 326445` in the other, so no single spatial grid holds both.
+OPERA assigns the UTM zone **per burst**, so an AOI near a zone boundary can be covered by
+bursts in two zones. The same ground then has two different sets of x and y coordinates,
+and no single spatial grid holds both.
 
 So return a dictionary per EPSG in your AOI:
 
@@ -86,67 +93,27 @@ stack = of.fetch_stacks(aoi, start, end, reproject_to="auto")          # one Dat
 stack = of.fetch_stacks(aoi, start, end, reproject_to="EPSG:32613")    # if you care which
 ```
 
-You should not have to know your UTM zone to get one Dataset, so `"auto"` picks it: the
-zone the AOI actually lies in, which is the one that fits it with the least distortion. Its
-data keeps the grid OPERA delivered, untouched, and the other zones move onto it. Where
+You may not know your UTM zone, so `"auto"` picks it: the
+zone the AOI actually lies in, which is the one that fits it with the least distortion.
+Data already in that UTM keeps the grid OPERA delivered, untouched, and the other zones move onto it. Where
 there is only one zone, which is the usual case, `"auto"` resamples nothing at all and
 simply hands back that Dataset.
 
 It finds that zone as the delivered zone whose central meridian is nearest the middle of
 the AOI. Zones are six degree bands about those meridians, so this is the zone containing
 the AOI whenever OPERA delivered that zone, and the nearest fit when every burst happened
-to land in a neighbour. Phrasing it as a best fit rather than a longitude lookup also means
-Svalbard, which uses 31X/33X/35X/37X instead of the plain bands, needs no special case.
-
-**`"auto"` deliberately ignores which zone holds more data.** How many acquisitions each
-zone collected is an accident of the tracks that were scheduled, so choosing on it would
-put the same AOI on a different grid from one season to the next. The cost is that a
-lopsided window can resample the larger half: on the East River AOI, zone 13 is the right
-zone and holds 4 acquisitions against zone 12's 2, but a season where that ratio inverted
-would still project onto zone 13 and move the larger set. Name the EPSG yourself if you
-would rather have the other trade.
+to land in a neighbour.
 
 `reproject_to` is the only resampling in the package, which is why it has to be asked for
 by name.
-
-**A zone already in the CRS you asked for is not touched.** It becomes the reference and
-keeps its own grid, so only the other zones move and the result stays on a lattice OPERA
-delivered. Ask for a CRS no zone is in and all of them move, onto a grid derived from the
-busiest, which is nobody's lattice. That case warns.
 
 We make the following reprojection choices. A mask is categorical, so it always moves by
 nearest. Real layers take `nearest` by default, which moves values without inventing any,
 and `resampling=` overrides that with any name from `rasterio.enums.Resampling`.
 
 **A complex layer is sinc interpolated**, the same family OPERA geocodes complex data with.
-It happens in two steps rather than through a kernel, which is why the code says nearest
-and does not mean it: the layer is oversampled eight times over by zero padding its
-spectrum, which is exact sinc interpolation for a bandlimited signal, and the fine sample
-is then read directly. Reading is the right second step precisely because it filters
-nothing, and it lands within a sixteenth of a pixel of what was asked for.
-
-Doing it in one step with a kernel is the obvious alternative, and it is measurably worse.
-A CSLC is bandlimited to its own grid, but speckle fills that band right up to Nyquist:
-half the energy of a real burst sits beyond half of Nyquist, exactly where a truncated sinc
-rolls off.
-
-**It reprojects the area you asked for, one acquisition at a time, not whole bursts**, so
-the memory is knowable before anything runs. A whole CSLC burst is 4842 by 18648, which is
-722 MB and would want 46 GB to oversample; the same burst clipped to a small AOI is 4 MB
-and wants about 800 MB. The grid follows from the area and the product's posting, so:
-
-```
-peak bytes  ~=  cells * 8 * factor^2 * 3
-```
-
-The 3 is measured, not assumed: the wide array, the transform's output, and one temporary
-inside it. Estimating the wide array alone was out by three, which made the budget guard
-allow four times what it thought.
-
-The factor gives way rather than the machine taking the hit: a scene too large for eight
-takes four or two, and a very large one is warned about and resampled directly. Each scene
-logs what it is about to cost. `scratch/oversample_before_reprojecting.py` reproduces the
-coherence table.
+It happens in two steps rather than through a kernel. The layer is oversampled eight times over by zero padding its
+spectrum and the fine sample is then read directly.
 
 ### What it refuses
 
@@ -254,7 +221,6 @@ one known to work.
 nothing after them.** The file is written correctly and the exit code is zero. It is an
 interpreter-shutdown interaction between rasterio, dask and h5py, not this package: the
 same code outside it does the same thing, and on 3.11 and 3.12 it does not happen at all.
-Measured on the RTC example, 62 such lines on 3.14 and none on 3.11.
 
 ## Earthdata login
 
@@ -297,9 +263,9 @@ pytest -m "not data"        # no OPERA granules on this machine needed
 
 The `data` tests read whatever granules the example scripts have downloaded, and skip when
 there are none. They pick whichever burst has the most acquisitions rather than naming one,
-so any cache will do. Point them elsewhere with `OPERA_FETCH_TEST_RTC` and
-`OPERA_FETCH_TEST_CSLC`, which is worth doing for CSLC, where the tests want a burst with
-more than the fortnight the example fetches.
+so any cache will do. Point them elsewhere with `OPERA_FETCH_TEST_RTC` and `OPERA_FETCH_TEST_CSLC`, which is
+worth doing for CSLC, where the tests want a burst with a longer time series than the
+example scripts download.
 
 Tests marked `data` run against real OPERA granules if they are on this machine and skip
 themselves otherwise. They are the ones that check this package against products as ASF

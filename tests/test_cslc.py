@@ -5,11 +5,21 @@ import re
 import numpy as np
 import pytest
 
+from opera_fetch import constants as const
 from opera_fetch import filenames
 from opera_fetch.cslc import read_burst
 from opera_fetch.grid import grid_like, spacing_of
 
 pytestmark = pytest.mark.data
+
+
+def an_acquisition(paths):
+    """One CSLC acquisition out of the fixture.
+
+    Not paths[0]: the fixture is sorted, and "CSLC-S1-STATIC" sorts before "CSLC-S1_", so
+    the first path is the static layer whenever one has been downloaded.
+    """
+    return next(p for p in paths if filenames.parse_product(p) == const.CSLC)
 
 
 def test_a_burst_reads_into_a_complex_time_series(cslc_paths):
@@ -38,10 +48,11 @@ def test_it_lands_on_the_5_by_10_m_lattice(cslc_paths):
 
 
 def test_the_big_phase_screens_are_left_out_unless_asked_for(cslc_paths):
-    lean = read_burst(cslc_paths[:1])
+    one = [an_acquisition(cslc_paths)]
+    lean = read_burst(one)
     assert "flattening_phase" not in lean
 
-    loaded = read_burst(cslc_paths[:1], extra=("flattening_phase",))
+    loaded = read_burst(one, extra=("flattening_phase",))
     assert "flattening_phase" in loaded
 
 
@@ -54,10 +65,11 @@ def test_nothing_is_read_into_memory_on_open(cslc_paths):
 def test_bursts_from_two_places_are_refused(cslc_paths):
     from pathlib import Path
 
-    burst = filenames.parse_burst_id(cslc_paths[0])
-    other = str(cslc_paths[0]).replace(burst, burst[:-1] + ("2" if burst[-1] == "1" else "1"))
+    one = an_acquisition(cslc_paths)
+    burst = filenames.parse_burst_id(one)
+    other = str(one).replace(burst, burst[:-1] + ("2" if burst[-1] == "1" else "1"))
     with pytest.raises(ValueError, match="span 2 bursts"):
-        read_burst([cslc_paths[0], Path(other)])
+        read_burst([one, Path(other)])
 
 
 def test_what_varies_between_acquisitions_rides_on_the_time_axis(cslc_paths):
