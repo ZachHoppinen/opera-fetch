@@ -62,7 +62,7 @@ the step that knows what it wants.
 
 The lattice is taken from the OPERA products themselves.
 
-### The dictionary is how we avoid reprojections
+### Returning a dictionary is how we avoid reprojections
 
 OPERA assigns the UTM zone **per burst**. Over the East River, T049 and T129 arrive as
 EPSG:32612 while T056 and T151 arrive as EPSG:32613. That is the same ground with
@@ -175,10 +175,37 @@ Static layers are made once per burst rather than once per acquisition, so they 
 searched by burst ID and downloaded once however many seasons the stack covers. They come
 along automatically; pass `static=False` to skip them.
 
-Complex data is challenged by netCDF-4 having no complex type, so a CSLC stack
-written to `.nc` goes through h5netcdf with `invalid_netcdf`. It is valid HDF5 and xarray
-reads it straight back, but a strict netCDF reader will not open it. **Use `.zarr` for
-CSLC.**
+### Writing a CSLC: use `.zarr`
+
+The netCDF-4 standard has no complex type, so there is nowhere in it to put a `complex64`
+value. `write` does it anyway, through h5netcdf with `invalid_netcdf=True`, and no data is
+lost, but what comes out is HDF5 that is not conforming netCDF.
+
+What that costs, measured rather than assumed:
+
+| reading it back | you get |
+|---|---|
+| `of.read`, or xarray with `engine="h5netcdf"` | `complex64`, bit for bit |
+| `netCDF4`, or xarray with `engine="netcdf4"` | opens and reads, but the variable is a compound `{r, i}` pair of float32 rather than a complex type |
+
+So the file is not unreadable elsewhere, which is what the h5netcdf warning implies. The
+values survive; the type does not, and anything downstream has to reassemble it:
+
+```python
+import netCDF4, numpy as np
+
+raw = netCDF4.Dataset("cslc.nc").variables["vv"][:]
+values = (raw["r"] + 1j * raw["i"]).astype("complex64")     # exact
+```
+
+Zarr has a complex type, so none of this applies:
+
+```python
+of.fetch_stacks(aoi, start, end, product=of.CSLC, out="data/processed/cslc.zarr")
+of.fetch_stacks(aoi, start, end, product=of.RTC,  out="data/processed/rtc.nc")
+```
+
+RTC is real valued and writes to either without any of this.
 
 ## Install
 
@@ -200,22 +227,45 @@ A GeoDataFrame you already hold works without `[vector]`; only opening a file ne
 netCDF4 is deliberately not a dependency: every read and write names `engine="h5netcdf"`
 or `"zarr"`, so the netCDF C library is never touched.
 
-Downloads need an Earthdata login in `~/.netrc`; without it the ASF data pool answers 403.
+Any environment with the dependencies will do; the one in `environment.yml` is only the
+one known to work.
 
-```
-machine urs.earthdata.nasa.gov login <user> password <password>
-```
+**On Python 3.14, writing netCDF ends in dozens of lines of `Error in sys.excepthook:` with
+nothing after them.** The file is written correctly and the exit code is zero. It is an
+interpreter-shutdown interaction between rasterio, dask and h5py, not this package: the
+same code outside it does the same thing, and on 3.11 and 3.12 it does not happen at all.
+Measured on the RTC example, 62 such lines on 3.14 and none on 3.11.
 
-Downloading uses threads rather than processes, so there is nothing platform-specific in
-it and it should run anywhere Python does. It has only been tested on macOS. On Windows the
-credentials file is `~/_netrc`, which `requests` looks for alongside `.netrc`.
+## Earthdata login
 
-Any environment with the dependencies will do; the one in `environment.yml` is only the one
-that is known to work. **On Python 3.14, writing netCDF ends in dozens of lines of `Error in
-sys.excepthook:` with nothing after them.** The file is written correctly and the exit code
-is zero. It is an interpreter-shutdown interaction between rasterio, dask and h5py, not this
-package: the same code outside it does the same thing, and on 3.11 and 3.12 it does not
-happen at all. Measured on the RTC example: 62 such lines on 3.14, none on 3.11.
+Searching ASF needs nothing. **Downloading needs a free NASA Earthdata account**, and
+without one the data pool answers `403` on every granule.
+
+1. Register at [urs.earthdata.nasa.gov/users/new](https://urs.earthdata.nasa.gov/users/new).
+   It is free and approval is immediate.
+2. Put the credentials in `~/.netrc`, which is where `requests` and `asf_search` both look:
+
+   ```
+   machine urs.earthdata.nasa.gov login YOUR_USERNAME password YOUR_PASSWORD
+   ```
+
+3. Make it readable only by you, which is the convention for a file holding a password:
+
+   ```bash
+   chmod 600 ~/.netrc
+   ```
+
+On Windows the file is `~/_netrc`, which `requests` looks for alongside `.netrc`. NASA's own
+walkthrough is
+[How to Generate Earthdata Prerequisite Files](https://disc.gsfc.nasa.gov/information/howto?title=How%20to%20Generate%20Earthdata%20Prerequisite%20Files),
+which covers the same thing for curl and wget.
+
+Nothing in this package reads or stores the credentials itself: `asf_search` opens the
+session and `requests` finds the file. In CI they come from repository secrets and are
+written to `~/.netrc` by the workflow, never committed.
+
+Downloading uses threads rather than processes, so there is nothing platform-specific in it
+and it should run anywhere Python does. It has only been tested on macOS.
 
 ## Tests
 
