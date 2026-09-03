@@ -51,17 +51,40 @@ the step that knows what it wants.
 
 The lattice is taken from the OPERA products themselves.
 
-That is why a result is **one Dataset per UTM zone**, keyed by EPSG:
+### The dictionary is how the promise is kept
+
+OPERA assigns the UTM zone **per burst**. Over the East River, T049 and T129 arrive as
+EPSG:32612 while T056 and T151 arrive as EPSG:32613. That is the same ground with
+`x = 846675` in one and `x = 326445` in the other, so no single grid holds both.
+
+So there are only two honest things to do with that, and one dishonest one:
+
+| | |
+|---|---|
+| reproject one zone onto the other | resamples, which is the thing this package exists not to do |
+| refuse to handle it | fails on half the AOIs tried: of four mountain sites, two straddled a boundary |
+| **hand back one Dataset per zone** | nothing moves, and you decide what to do about it |
+
+Hence the return type:
 
 ```
 {32612: <xarray.Dataset>, 32613: <xarray.Dataset>}
 ```
 
-Usually one entry. The zone is the only thing that forces a second, because OPERA assigns
-it per burst: over the East River two tracks come as 32612 and two as 32613, and no grid
-holds both. It is not rare, either. Of four mountain sites, two straddled a boundary.
+**It is a dictionary so that nothing has to be reprojected.** Not to group results, and
+not because passes are separate. Purely because two UTM zones cannot share x and y
+coordinates, and forcing them to would mean resampling every pixel of one of them.
 
-Within a zone OPERA's grid is constant, so every track lands on it. **Every acquisition is
+Usually there is a single entry, and the zone is the only thing that ever forces a second.
+When it does, you can put them on one grid yourself, knowing you asked for it:
+
+```python
+stacks = of.fetch_stacks(aoi, start, end, reproject_to="EPSG:32613")   # one Dataset
+```
+
+### Within a zone, a track is never a reason for a second entry
+
+OPERA's grid is constant inside a zone, so every track lands on it. **Every acquisition is
 one step on the time axis**, whichever track it came from, with `track` and `direction` as
 coordinates alongside:
 
@@ -75,14 +98,9 @@ Nothing is padded to make that work: four acquisitions across two tracks are fou
 Ascending and descending still must not be *averaged* together, and neither must two
 tracks. That is a mosaic rule, and mosaicking happens per pass before any of this.
 
-If you would rather have one Dataset than two, ask for it by name:
-
-```python
-stacks = of.fetch_stacks(aoi, start, end, reproject_to="EPSG:32613")
-```
-
-That is the only resampling in the package, which is why it has to be requested. It moves
-the smaller zone onto the larger one's grid, nearest neighbour, so no value is invented.
+`reproject_to` is the only resampling in the package, which is why it has to be asked for
+by name. It moves the smaller zone onto the larger one's grid, nearest neighbour, so no
+value is invented and the larger part of the result is still on a grid OPERA delivered.
 
 **Neighbouring bursts are acquired seconds apart.** That is enough to make every burst's
 time axis unique, and a mosaic of them an empty diagonal ribbon. `align_passes` collapses
@@ -210,7 +228,7 @@ pytest -m "not data"        # no OPERA granules on this machine needed
 The `data` tests read whatever granules the example scripts have downloaded, and skip when
 there are none. They pick whichever burst has the most acquisitions rather than naming one,
 so any cache will do. Point them elsewhere with `OPERA_FETCH_TEST_RTC` and
-`OPERA_FETCH_TEST_CSLC` — worth it for CSLC, where the time-series tests want a burst with
+`OPERA_FETCH_TEST_CSLC`, which is worth doing for CSLC, where the tests want a burst with
 more than the fortnight the example fetches.
 
 Tests marked `data` run against real OPERA granules if they are on this machine and skip
