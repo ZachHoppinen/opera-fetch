@@ -48,3 +48,12 @@ markers = [
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
+
+[tool.ruff.lint]
+# Named rather than left to the default set, which grows between ruff releases and
+# would otherwise fail CI on a rule that did not exist when the code was written.
+select = ["E", "F", "I", "W", "UP", "B", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+# The examples read top to bottom; a long line in one is not worth wrapping.
+"scripts/*" = ["E501"]

@@ -17,7 +17,7 @@ old failure exactly.
 
 import os
 import random
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 import numpy as np
 import pytest
@@ -46,7 +46,7 @@ def week():
     """A generator stable within an ISO week, and its seed."""
     seed = os.environ.get("OPERA_FETCH_SEED")
     if seed is None:
-        year, number, _ = datetime.now(timezone.utc).isocalendar()
+        year, number, _ = datetime.now(UTC).isocalendar()
         seed = f"{year}-W{number:02d}"
     print(f"\nweek seed: {seed}  (replay with OPERA_FETCH_SEED={seed})")
     return random.Random(seed), seed
@@ -55,7 +55,7 @@ def week():
 @pytest.fixture(scope="module")
 def case(week):
     """An area and a date range for this week."""
-    rng, seed = week
+    rng, _ = week
     name = rng.choice(sorted(SITES))
     lon, lat = SITES[name]
     # A small box: enough for a burst or two, not enough to be a slow download.

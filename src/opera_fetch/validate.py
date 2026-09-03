@@ -75,7 +75,7 @@ def report(stack, aoi=None, strict=True):
             duplicated=sorted(times[times.duplicated()].unique()),
             monotonic=bool(times.is_monotonic_increasing),
             coverage=finite,
-            empty_times=[str(t) for t, f in zip(times, finite) if f == 0],
+            empty_times=[str(t) for t, f in zip(times, finite, strict=True) if f == 0],
             median_coverage=float(np.median(finite)) if len(finite) else float("nan"),
         )
     if aoi is not None:

@@ -127,7 +127,7 @@ def data_urls(frame, layers=None):
 
     # Kept as {url: bytes} so the same pass gives both the list and its size.
     wanted = {}
-    for urls, sizes in zip(frame["urls"], frame["sizes"]):
+    for urls, sizes in zip(frame["urls"], frame["sizes"], strict=True):
         for url in urls:
             name = url.rsplit("/", 1)[-1]
             if _is_data(name, product, layers):

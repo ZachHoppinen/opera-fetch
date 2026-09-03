@@ -90,7 +90,7 @@ def _to_shapely(aoi):
 
     if isinstance(aoi, (list, tuple)):
         if len(aoi) == 4 and all(isinstance(value, (int, float)) for value in aoi):
-            west, south, east, north = aoi
+            west, east = aoi[0], aoi[2]
             if west > east:
                 raise ValueError(
                     f"west {west} is east of east {east}, so this box crosses the "

@@ -100,7 +100,7 @@ def test_a_burst_whose_box_touches_but_whose_data_does_not_is_left_out(rtc_two_b
 
     bursts = read_bursts(rtc_two_bursts)
     footprint = shapely.wkt.loads(bursts[0].attrs["footprint"])
-    west, south, east, north = footprint.bounds
+    west, _, _, north = footprint.bounds
 
     # The northwest corner of the bounding box, which the rotated footprint never reaches.
     corner = shapely.geometry.box(west, north - 0.01, west + 0.01, north)

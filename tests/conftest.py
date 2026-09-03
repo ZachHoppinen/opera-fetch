@@ -41,7 +41,7 @@ def rtc_paths():
     """Every RTC and RTC-STATIC file of whichever burst has the most acquisitions."""
     if not RTC_DATA.exists():
         pytest.skip(f"no RTC granules at {RTC_DATA}")
-    burst, paths = _busiest_burst(sorted(RTC_DATA.glob("*.tif")))
+    _, paths = _busiest_burst(sorted(RTC_DATA.glob("*.tif")))
     if not paths:
         pytest.skip(f"no RTC acquisitions at {RTC_DATA}")
     return paths
@@ -70,7 +70,7 @@ def cslc_paths():
     """CSLC granules of whichever burst has the most acquisitions."""
     if not CSLC_DATA.exists():
         pytest.skip(f"no CSLC granules at {CSLC_DATA}")
-    burst, paths = _busiest_burst(sorted(CSLC_DATA.glob("*.h5")))
+    _, paths = _busiest_burst(sorted(CSLC_DATA.glob("*.h5")))
     acquisitions = [p for p in paths if filenames.parse_fields(p)["processed"]]
     if len(acquisitions) < 2:
         pytest.skip(f"need a burst with two acquisitions at {CSLC_DATA}; "

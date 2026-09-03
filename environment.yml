@@ -22,7 +22,7 @@ dependencies:
   - zarr
   # Development and CI: the workflows invoke all four.
   - pytest
-  - ruff
+  - ruff>=0.14
   - python-build
   - twine
   - pip

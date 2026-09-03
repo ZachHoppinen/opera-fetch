@@ -10,7 +10,7 @@ single grid cannot cross.
 
 import logging
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import NamedTuple
 
@@ -153,7 +153,7 @@ def assemble(paths, aoi=None, aoi_crs=None, bounds=None, how=None, tolerance=TOL
         if aoi is not None and mask:
             stack = clip(stack, aoi, mask=True)
         stack.attrs.update(track=key.track, direction=key.direction, epsg=key.epsg,
-                           created=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                           created=datetime.now(UTC).isoformat(timespec="seconds"),
                            opera_fetch_version=const.__version__)
 
         if not _has_data(stack):

@@ -86,7 +86,7 @@ def keep_latest_processing(keys, granules):
     polarization for CSLC, whose polarizations arrive as separate granules.
     """
     latest = {}
-    for index, (key, granule) in enumerate(zip(keys, granules)):
+    for index, (key, granule) in enumerate(zip(keys, granules, strict=True)):
         if key in latest:
             best_so_far = parse_processing_time(granules[latest[key]])
             if parse_processing_time(granule) <= best_so_far:
