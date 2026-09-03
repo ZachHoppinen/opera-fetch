@@ -78,12 +78,6 @@ def cslc_paths():
     return paths
 
 
-@pytest.fixture
-def fake_burst():
-    """A small stack on a real 30 m OPERA lattice, for the tests that need no granules."""
-    return make_burst(west=500_010, north=4_332_210, columns=8, rows=6)
-
-
 def make_burst(west, north, columns=8, rows=6, times=2, track=49, direction="ASCENDING",
                spacing=(30.0, 30.0), epsg=32612, fill=1.0):
     dx, dy = (spacing, spacing) if isinstance(spacing, (int, float)) else spacing

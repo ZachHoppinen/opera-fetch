@@ -5,7 +5,6 @@ import re
 import numpy as np
 import pytest
 
-from opera_fetch import constants as const
 from opera_fetch.grid import grid_like, place, spacing_of
 from opera_fetch.rtc import read_burst
 from opera_fetch.stack import assemble
@@ -42,7 +41,7 @@ def test_values_are_linear_gamma0_and_nothing_has_been_masked(rtc_paths):
     assert np.nanmin(scene) >= 0, "linear power cannot be negative; this looks like dB"
     assert burst.mask.dtype == np.uint8
     # Layover and shadow pixels are still there to be looked at, not blanked on the way in.
-    assert np.isfinite(scene[burst.mask.isel(time=0).values != const.MASK_CLEAR]).any()
+    assert np.isfinite(scene[burst.mask.isel(time=0).values != 0]).any()
 
 
 def test_static_layers_come_in_as_radians_on_the_burst_grid(rtc_paths):

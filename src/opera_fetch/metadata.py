@@ -7,8 +7,6 @@ drift into describing themselves differently.
 
 from opera_fetch import constants as const
 
-FIELDS = ("burst_id", "track", "direction", "footprint", "product_version")
-
 
 def describe(stack, product, identity, granules):
     """Carry the burst's identity onto the stack it came from."""

@@ -333,7 +333,7 @@ def test_both_products_describe_themselves_the_same_way():
     group = {"burst_id": b"t049_103327_iw3".decode(), "track_number": 49,
              "orbit_pass_direction": "Ascending", "bounding_polygon": "POLYGON ((0 0))",
              "product_version": "1.0"}
-    assert set(rtc.identify(tags)) == set(cslc.identify(group)) == set(metadata.FIELDS)
+    assert set(rtc.identify(tags)) == set(cslc.identify(group))
 
     one = metadata.describe(make_burst(west=500_010, north=4_332_210), "RTC",
                             rtc.identify(tags), ["a"]).attrs

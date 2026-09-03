@@ -1,10 +1,12 @@
 """Put a stack on disk, as netCDF, HDF5 or Zarr.
 
-Passes are not on one grid, so they cannot share x and y coordinates; each becomes a group.
+UTM zones are not on one grid, so they cannot share x and y coordinates; each becomes a
+group.
 
 netCDF-4 has no complex type, so a CSLC stack goes through h5netcdf with ``invalid_netcdf``:
-valid HDF5 that xarray reads back, but a strict netCDF reader will not open it. Prefer Zarr
-for complex.
+valid HDF5, which ``read`` and xarray's h5netcdf engine give back as complex64. Other
+readers do open it, netCDF4 included, but see a compound ``{r, i}`` pair of float32 rather
+than a complex type. Prefer Zarr for complex, which has one.
 """
 
 import logging
@@ -17,7 +19,7 @@ log = logging.getLogger(__name__)
 
 
 def write(obj, path, complevel=4):
-    """Write a stack, or the several passes of one, to path.
+    """Write a stack, or the several UTM zones of one, to path.
 
     The format follows the suffix: .nc and .h5 go through h5netcdf, .zarr through zarr.
     """

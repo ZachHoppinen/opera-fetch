@@ -21,7 +21,7 @@ shifts:
     oversample 16x, then nearest  0.999
 
 The 2x row is held back by GDAL filtering a second time as it decimates, which costs more
-than it saves. ``scratch/oversample_before_reprojecting.py`` reproduces the numbers.
+than it saves.
 """
 
 import logging

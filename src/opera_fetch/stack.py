@@ -1,11 +1,12 @@
-"""Downloaded files to one analysis-ready stack per pass.
+"""Downloaded files to one analysis-ready stack per UTM zone.
 
 Bursts are read on their own lattice, given a shared time axis, and mosaicked last, so one
 burst can fill what another is missing: layover and shadow fall in different places for
 different look geometries.
 
-One Dataset comes back per track, pass direction and UTM zone, which are the boundaries a
-single grid cannot cross.
+A pass, one track and direction, is the unit bursts are mosaicked over. It is not the unit
+results come back in: within a zone OPERA's grid is constant, so every pass lands on it and
+one Dataset per zone holds them all, with track and direction on the time axis.
 """
 
 import logging

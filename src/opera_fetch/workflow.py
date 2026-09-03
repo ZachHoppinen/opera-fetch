@@ -14,7 +14,7 @@ from opera_fetch.write import write
 log = logging.getLogger(__name__)
 
 
-def cache_dir_path(cache_dir, url):
+def _cache_dir_path(cache_dir, url):
     """Where download puts a URL, so a re-fetch can be matched back to it."""
     return Path(cache_dir) / Path(url).name
 
@@ -158,7 +158,7 @@ def fetch_stacks(aoi, start=None, end=None, product=const.RTC, cache_dir="data/r
         log.warning("%d cached file(s) do not read; fetching them again", len(broken))
         for path in broken:
             path.unlink(missing_ok=True)
-        again = [url for url in urls if cache_dir_path(cache_dir, url) in set(broken)]
+        again = [url for url in urls if _cache_dir_path(cache_dir, url) in set(broken)]
         download(again, cache_dir, max_workers=max_workers)
         still_broken = check_files(broken)
         if still_broken:

@@ -9,10 +9,12 @@ The six steps every project repeats:
     5. stack them in time                opera_fetch.stack
     6. clip to the area and check        opera_fetch.grid, opera_fetch.validate
 
-``fetch`` runs all six. Everything it uses is public, so any one step can be run alone.
+``fetch_stacks`` runs all six. Everything it uses is public, so any one step can be run
+alone.
 
-Nothing here resamples. Products come back on the lattice OPERA delivers them on, in the
-UTM zone of their bursts, and reprojecting is left to whatever comes next.
+Products come back on the lattice OPERA delivers them on, in the UTM zone of their bursts.
+Nothing is resampled unless ``reproject_to`` asks for it, which is the one place a value
+moves.
 """
 
 from opera_fetch.aoi import as_geometry

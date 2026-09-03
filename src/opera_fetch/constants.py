@@ -63,7 +63,6 @@ DEFAULT_RESAMPLING = {"real": "nearest", "mask": "nearest"}
 # Layover/shadow codes: 0 clear, 1 shadow, 2 layover, 3 both. RTC ships one mask per
 # acquisition; CSLC ships none, and its only mask is the once-per-burst static one. Both
 # are called "mask" here so `stack.where(stack.mask == 0)` reads the same either way.
-MASK_CLEAR = 0
 MASK_NODATA = {RTC: 255, CSLC: 127}
 MASK_DTYPE = {RTC: "uint8", CSLC: "int8"}
 MASK_MEANINGS = "0 clear, 1 shadow, 2 layover, 3 both"
