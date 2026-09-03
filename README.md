@@ -116,6 +116,25 @@ amplitude they keep, which is why the default is the one that keeps the most. `r
 `mode` are refused on complex data: they reduce a window to a magnitude, so there is no
 phase left to move.
 
+**Reprojecting a CSLC still costs coherence, and the default path never does it.** Speckle
+fills the band: half the energy of a real burst sits beyond half of Nyquist, exactly where
+a truncated sinc rolls off. Shifting real CSLC rows by half a pixel, against the analytic
+answer:
+
+| | coherence with the exact shift |
+|---|---|
+| no shift at all, as `nearest` does | 0.638 |
+| `lanczos` directly, which is what GDAL gives | 0.951 |
+| oversample 2x first, then `lanczos` | 1.000 |
+
+Oversampling first recovers all of it, because zero padding the spectrum is exact for
+bandlimited data and leaves the signal in the half of the band the kernel handles cleanly.
+This package does not do it: that means an FFT resampler of its own, and the only path that
+resamples a CSLC is `reproject_to`, which is opt in and needed only across a zone boundary,
+where the two halves are different tracks you would not interfere anyway. If you need a
+cross-zone CSLC at full coherence, oversample before reprojecting rather than relying on
+this. `scratch/oversample_before_reprojecting.py` reproduces the table.
+
 **Neighbouring bursts are acquired seconds apart.** That is enough to make every burst's
 time axis unique, and a mosaic of them an empty diagonal ribbon. `align_passes` collapses
 timestamps closer together than a tolerance, 10 minutes by default, into one pass.
@@ -152,6 +171,20 @@ an RTC mask **per acquisition**, so `mask` there has dims `(time, y, x)`. It shi
 mask at all; the only one is in CSLC-STATIC, made **once per burst**, so `mask` there is
 `(y, x)` and broadcasts over time. The codes agree: 0 clear, 1 shadow, 2 layover, 3 both.
 No observation does not: 255 for RTC (uint8) and 127 for CSLC (int8).
+
+### What it refuses
+
+Four things raise rather than returning something quietly wrong:
+
+- **An AOI across the antimeridian.** Left alone, `box(179.5, 51.5, -179.5, 52)` becomes
+  the whole world except that box, and the search returns thousands of granules. Split it
+  at 180 and assemble each side; they are in different zones anyway.
+- **A date range ending before the OPERA archive starts**, which is around 2016, not 2014
+  when Sentinel-1 launched. A range inside the December 2021 to 2025 single-satellite gap
+  is allowed but noted: Sentinel-1B had failed and 1C was not yet operational, so there are
+  about half the usual acquisitions.
+- **An `aoi` and `bounds` together**, since both say what area to deliver.
+- **`rms` or `mode` on complex data**, as above.
 
 ## Products
 
