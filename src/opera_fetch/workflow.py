@@ -69,9 +69,9 @@ def fetch_stacks(aoi, start=None, end=None, product=const.RTC, cache_dir="data/r
 
     reproject_to
         A CRS to put every zone on, giving one Dataset instead of one per zone.
-        ``"auto"`` picks it for you: the zone already holding the most of the AOI, so the
-        bulk of the data keeps OPERA's own grid and only the smaller zone is resampled.
-        The only resampling in the package, which is why it has to be asked for.
+        ``"auto"`` picks it for you: the zone the AOI lies in, so nobody has to know their
+        EPSG and the same AOI lands on the same grid whatever window is asked for. The only
+        resampling in the package, which is why it has to be asked for.
     resampling
         How the real layers are interpolated: any name from ``rasterio.enums.Resampling``,
         nearest by default. A mask always moves by nearest, being categorical, and a

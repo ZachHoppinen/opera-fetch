@@ -148,9 +148,9 @@ def assemble(paths, aoi=None, aoi_crs=None, how=None, tolerance=TOLERANCE,
         Also blank what falls outside the AOI polygon, rather than outside its bounding box.
     reproject_to
         A CRS to put every zone on, returning a single Dataset instead of one per zone.
-        ``"auto"`` picks the zone already holding the most of the AOI, so the bulk of the
-        data stays on the grid OPERA delivered and only the smaller zone moves. This is
-        the only resampling the package does, which is why it has to be asked for.
+        ``"auto"`` picks the zone the AOI lies in, so nobody has to know their EPSG and
+        the same AOI lands on the same grid whatever window is asked for. This is the only
+        resampling the package does, which is why it has to be asked for.
     resampling
         How the real layers are interpolated: any name from ``rasterio.enums.Resampling``,
         nearest by default. A mask is categorical and always moves by nearest. A complex
@@ -276,65 +276,40 @@ def _all_equal(layers):
     return all(np.array_equal(first, other.values, equal_nan=True) for other in layers[1:])
 
 
-# How close two zones must score to count as holding the same amount. Normalising takes
-# the grid distortion out, which leaves the two within a fraction of a percent when they
-# cover the same ground; a zone that genuinely holds less is nowhere near this close.
-SAME_HOLDING = 0.02
-
-
 def _best_zone(stacks, aoi=None):
     """The EPSG to reproject onto when the caller would rather not name one.
 
-    Whichever zone is chosen the others must be resampled, so the choice is really which
-    values get to stay put, and the zone holding the most of them leaves the fewest to move.
+    The zone the AOI actually lies in, which is the one that fits it with the least
+    distortion. Found as the delivered zone whose central meridian is nearest the middle of
+    the AOI: zones are six degree bands about those meridians, so the nearest one is the
+    zone containing the AOI whenever OPERA delivered that zone, and the next best fit when
+    it did not.
 
-    Holdings are counted as a fraction of the zone's own grid rather than in cells, because
-    cells are not comparable between zones: the same AOI reprojected into a badly fitting
-    zone spans more of them, and that inflation would read as more data. Scoring the
-    fraction and multiplying by acquisitions takes it back out.
-
-    Both zones usually cover very nearly all of the AOI, so acquisitions decide in practice.
-    When those match too there is no difference in what moves, and the tie goes to the zone
-    the AOI actually lies in.
+    Some of the data still has to move and this does not try to make it the smaller half.
+    Which zone holds more acquisitions is an accident of the tracks that happened to be
+    scheduled, so choosing on it would put the same AOI on a different grid from one season
+    to the next.
     """
-    from opera_fetch.validate import primary_variable
+    if aoi is None:
+        log.info("no AOI to place, so reprojecting onto EPSG:%d, the lowest zone delivered",
+                 min(stacks))
+        return min(stacks)
 
-    # Valid observations, in units of one full AOI grid: coverage and acquisitions in one
-    # number, and comparable across zones.
-    held = {}
-    for epsg, stack in stacks.items():
-        scene = stack[primary_variable(stack)]
-        held[epsg] = float(np.isfinite(scene).sum()) / (stack.sizes["y"] * stack.sizes["x"])
+    centre = aoi.centroid
+    hemisphere = 326 if centre.y >= 0 else 327
 
-    most = max(held.values())
-    tied = sorted(epsg for epsg, score in held.items() if score >= most * (1 - SAME_HOLDING))
-    natural = _utm_zone(aoi) if aoi is not None else None
-    best = natural if natural in tied else tied[0]
+    def fit(epsg):
+        # Zone n is centred on 6n - 183: zone 13 on -105, zone 33 on 15.
+        meridian = (epsg % 100) * 6 - 183
+        return epsg // 100 == hemisphere, -abs(centre.x - meridian)
 
-    if len(held) > 1:
-        log.info("reprojecting onto EPSG:%d, which leaves the fewest values to move (%s)",
-                 best, ", ".join(f"EPSG:{epsg} holds {score:.2f}"
-                                 for epsg, score in sorted(held.items())))
-        if len(tied) > 1:
-            log.info("EPSG:%s hold the same amount, so the tie went to %s", tied,
-                     "the zone the AOI is in" if best == natural else "the lower EPSG")
+    # Sorted first, so two zones that fit equally well go to the lower EPSG rather than to
+    # whichever was read first.
+    best = max(sorted(stacks), key=fit)
+    if len(stacks) > 1:
+        log.info("reprojecting onto EPSG:%d, the zone the AOI lies in; EPSG:%s has to move",
+                 best, [epsg for epsg in sorted(stacks) if epsg != best])
     return best
-
-
-def _utm_zone(geometry):
-    """The UTM zone an area actually lies in, as an EPSG code.
-
-    Only used to settle a tie, so the centre of the area is enough: an AOI spanning two
-    zones has no single right answer, and either is as defensible as the other.
-
-    This is the plain longitude rule and does not know the Norway and Svalbard exceptions.
-    There it names a zone that is not among the candidates, the tie falls through to the
-    lower EPSG, and nothing worse happens than an arbitrary choice between two zones that
-    hold the same data.
-    """
-    centre = geometry.centroid
-    zone = int((centre.x + 180) // 6) + 1
-    return (32600 if centre.y >= 0 else 32700) + zone
 
 
 def _onto_one_crs(stacks, crs, resampling=None):

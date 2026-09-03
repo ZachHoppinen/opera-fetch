@@ -86,23 +86,25 @@ stack = of.fetch_stacks(aoi, start, end, reproject_to="auto")          # one Dat
 stack = of.fetch_stacks(aoi, start, end, reproject_to="EPSG:32613")    # if you care which
 ```
 
-You should not have to know your UTM zone to get one Dataset, so `"auto"` picks it.
-Whichever zone is chosen the others get resampled, so the choice is really which values
-stay put, and `"auto"` takes the zone holding the most of them. The winner keeps the grid
-OPERA delivered, untouched. Where there is only one zone, which is the usual case, `"auto"`
-resamples nothing at all and simply hands back that Dataset.
+You should not have to know your UTM zone to get one Dataset, so `"auto"` picks it: the
+zone the AOI actually lies in, which is the one that fits it with the least distortion. Its
+data keeps the grid OPERA delivered, untouched, and the other zones move onto it. Where
+there is only one zone, which is the usual case, `"auto"` resamples nothing at all and
+simply hands back that Dataset.
 
-Holdings are counted as a fraction of each zone's own grid, not in cells. Cells are not
-comparable between zones: the same AOI reprojected into a badly fitting zone spans more of
-them, and that inflation would read as more data. On the East River AOI, zone 12 grids at
-390x451 against zone 13's 381x442 for the same ground, a 4% head start for the zone the
-AOI is not in.
+It finds that zone as the delivered zone whose central meridian is nearest the middle of
+the AOI. Zones are six degree bands about those meridians, so this is the zone containing
+the AOI whenever OPERA delivered that zone, and the nearest fit when every burst happened
+to land in a neighbour. Phrasing it as a best fit rather than a longitude lookup also means
+Svalbard, which uses 31X/33X/35X/37X instead of the plain bands, needs no special case.
 
-In practice both zones cover very nearly all of the AOI, 99.77% and 99.96% on that same
-example, so acquisitions are what actually separate them. When those match too, neither
-zone is cheaper to keep, and the tie goes to the zone the AOI actually lies in. The plain
-longitude rule decides that, so it does not know the Norway and Svalbard exceptions; there
-it names no candidate and the tie falls to the lower EPSG, which is still repeatable.
+**`"auto"` deliberately ignores which zone holds more data.** How many acquisitions each
+zone collected is an accident of the tracks that were scheduled, so choosing on it would
+put the same AOI on a different grid from one season to the next. The cost is that a
+lopsided window can resample the larger half: on the East River AOI, zone 13 is the right
+zone and holds 4 acquisitions against zone 12's 2, but a season where that ratio inverted
+would still project onto zone 13 and move the larger set. Name the EPSG yourself if you
+would rather have the other trade.
 
 `reproject_to` is the only resampling in the package, which is why it has to be asked for
 by name.

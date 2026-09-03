@@ -384,28 +384,79 @@ def test_a_crs_no_zone_is_in_says_everything_moves(caplog):
     assert "no zone is in" in caplog.text
 
 
-def test_auto_picks_the_zone_that_leaves_the_fewest_values_to_move():
-    """Nobody knows their UTM zone offhand, so 'auto' picks the one holding the most data.
+def _aoi_in_zone_13():
+    """A box near -106.9, which is UTM zone 13. Zone 12 spans -114 to -108."""
+    from shapely.geometry import box
 
-    Coverage alone and acquisition count alone both get this wrong, so each case below is
-    one where the two disagree and only their product gives the answer that resamples less.
+    return box(-107.0, 38.85, -106.85, 38.95)
+
+
+def test_auto_picks_the_zone_the_aoi_lies_in():
+    """Nobody knows their UTM zone offhand, so 'auto' picks the one the AOI is actually in.
+
+    That is the zone fitting it with the least distortion, and it does not depend on how
+    many acquisitions each zone happened to collect, so the same AOI lands on the same grid
+    whatever window is asked for.
     """
     from opera_fetch.stack import _best_zone
 
-    # Wide but rarely imaged, 48 cells x 2, against a sliver imaged often, 12 cells x 9.
-    wide = make_burst(west=500_010, north=4_332_210, epsg=32612, times=2)
-    often = make_burst(west=500_010, north=4_332_210, epsg=32613, times=9)
-    often["vv"][:, :, 2:] = np.nan
-    assert _best_zone({32612: wide, 32613: often}) == 32613, "96 values would move, not 108"
-
-    # Same shapes, but now the sliver is imaged only three times: 48 x 2 beats 12 x 3.
-    seldom = make_burst(west=500_010, north=4_332_210, epsg=32613, times=3)
-    seldom["vv"][:, :, 2:] = np.nan
-    assert _best_zone({32612: wide, 32613: seldom}) == 32612, "36 values would move, not 96"
+    zones = {32612: make_burst(west=500_010, north=4_332_210, epsg=32612),
+             32613: make_burst(west=500_010, north=4_332_210, epsg=32613)}
+    assert _best_zone(zones, _aoi_in_zone_13()) == 32613
 
 
-def test_auto_is_repeatable_when_two_zones_hold_the_same():
-    """Same AOI, same answer: a tie must not fall to whichever zone was read first."""
+def test_auto_ignores_which_zone_holds_more_data():
+    """The point of choosing on geography: a lopsided season must not move the grid.
+
+    Zone 12 here has four times the acquisitions and full coverage, and still loses, because
+    next season the counts could just as easily go the other way.
+    """
+    from opera_fetch.stack import _best_zone
+
+    busy = make_burst(west=500_010, north=4_332_210, epsg=32612, times=8)
+    quiet = make_burst(west=500_010, north=4_332_210, epsg=32613, times=2)
+    quiet["vv"][:, :, 4:] = np.nan
+
+    assert _best_zone({32612: busy, 32613: quiet}, _aoi_in_zone_13()) == 32613
+
+
+def test_auto_takes_the_best_fit_when_the_aois_own_zone_was_not_delivered():
+    """Every burst may sit in a neighbouring zone, and then the AOI's own zone is not on
+    offer at all. The nearest central meridian is still the least bad grid.
+    """
+    from opera_fetch.stack import _best_zone
+
+    zones = {32611: make_burst(west=500_010, north=4_332_210, epsg=32611),
+             32612: make_burst(west=500_010, north=4_332_210, epsg=32612)}
+    assert _best_zone(zones, _aoi_in_zone_13()) == 32612, "zone 12 is the nearer of the two"
+
+
+def test_auto_handles_svalbard_without_knowing_the_exception():
+    """Svalbard uses 31X/33X/35X/37X rather than the plain six degree bands, so a longitude
+    lookup would name zone 32 and miss. Asking which delivered zone fits best does not.
+    """
+    from shapely.geometry import box
+
+    from opera_fetch.stack import _best_zone
+
+    zones = {32633: make_burst(west=500_010, north=8_600_010, epsg=32633),
+             32635: make_burst(west=500_010, north=8_600_010, epsg=32635)}
+    assert _best_zone(zones, box(11.0, 78.0, 11.1, 78.1)) == 32633
+
+
+def test_auto_stays_in_the_southern_hemisphere():
+    """326xx and 327xx share a central meridian, so the hemisphere has to be looked at."""
+    from shapely.geometry import box
+
+    from opera_fetch.stack import _best_zone
+
+    zones = {32719: make_burst(west=500_010, north=6_200_010, epsg=32719),
+             32619: make_burst(west=500_010, north=6_200_010, epsg=32619)}
+    assert _best_zone(zones, box(-70.0, -34.0, -69.9, -33.9)) == 32719
+
+
+def test_auto_without_an_aoi_is_still_repeatable():
+    """reproject_to works without an AOI, and then there is no geography to appeal to."""
     from opera_fetch.stack import _best_zone
 
     a = make_burst(west=500_010, north=4_332_210, epsg=32612)
@@ -415,17 +466,16 @@ def test_auto_is_repeatable_when_two_zones_hold_the_same():
 
 
 def test_auto_leaves_the_chosen_zone_on_operas_own_grid():
-    """The point of choosing the busiest zone is that most of the data then never moves."""
+    """The point of choosing a zone at all is that its data then never moves."""
     from opera_fetch.stack import _best_zone, _onto_one_crs
 
-    winner = make_burst(west=500_010, north=4_332_210, epsg=32612)
-    other = make_burst(west=500_010, north=4_332_210, epsg=32613)
-    other["vv"][:, :, 4:] = np.nan          # half the coverage, same number of acquisitions
+    winner = make_burst(west=500_010, north=4_332_210, epsg=32613)
+    other = make_burst(west=500_010, north=4_332_210, epsg=32612)
 
-    zones = {32612: winner, 32613: other}
-    joined = _onto_one_crs(zones, f"EPSG:{_best_zone(zones)}")
+    zones = {32612: other, 32613: winner}
+    joined = _onto_one_crs(zones, f"EPSG:{_best_zone(zones, _aoi_in_zone_13())}")
 
-    assert joined.rio.crs.to_epsg() == 32612
+    assert joined.rio.crs.to_epsg() == 32613
     assert np.array_equal(joined.x.values, winner.x.values), "the winner's grid moved"
     assert np.array_equal(joined.y.values, winner.y.values), "the winner's grid moved"
 
@@ -436,81 +486,9 @@ def test_auto_on_a_single_zone_resamples_nothing(caplog):
 
     from opera_fetch.stack import _best_zone, _onto_one_crs
 
-    only = make_burst(west=500_010, north=4_332_210, epsg=32612)
+    only = {32612: make_burst(west=500_010, north=4_332_210, epsg=32612)}
     with caplog.at_level(logging.WARNING, logger="opera_fetch.stack"):
-        joined = _onto_one_crs({32612: only}, f"EPSG:{_best_zone({32612: only})}")
+        joined = _onto_one_crs(only, f"EPSG:{_best_zone(only, _aoi_in_zone_13())}")
 
-    assert np.array_equal(joined.vv.values, only.vv.values)
+    assert np.array_equal(joined.vv.values, only[32612].vv.values)
     assert "moves a value" not in caplog.text
-
-
-def _aoi_in_zone_13():
-    """A box near -106.9, which is UTM zone 13 and nowhere near zone 12's -114 to -108."""
-    from shapely.geometry import box
-
-    return box(-107.0, 38.85, -106.85, 38.95)
-
-
-def test_two_zones_covering_it_all_are_split_on_where_the_aoi_is():
-    """The likely case: both zones cover ~100% of the AOI and are imaged the same number
-    of times, so nothing about the data separates them and geography has to.
-    """
-    from opera_fetch.stack import _best_zone
-
-    # Same ground and same acquisitions, but the AOI reprojected into the zone it does not
-    # belong to spans more cells. Counting cells would read that inflation as more data.
-    wrong = make_burst(west=500_010, north=4_332_210, epsg=32612, columns=10, rows=10)
-    right = make_burst(west=500_010, north=4_332_210, epsg=32613, columns=8, rows=8)
-
-    assert _best_zone({32612: wrong, 32613: right}, _aoi_in_zone_13()) == 32613
-
-
-def test_a_zone_that_really_holds_more_still_wins_over_geography():
-    """Geography only settles a tie. Real data beats it, or auto would resample the bulk
-    of a time series to sit in a prettier zone.
-    """
-    from opera_fetch.stack import _best_zone
-
-    outside = make_burst(west=500_010, north=4_332_210, epsg=32612, times=8)
-    inside = make_burst(west=500_010, north=4_332_210, epsg=32613, times=2)
-
-    assert _best_zone({32612: outside, 32613: inside}, _aoi_in_zone_13()) == 32612
-
-
-def test_a_tie_without_an_aoi_still_lands_somewhere_repeatable():
-    """reproject_to works without an AOI, and then there is no geography to appeal to."""
-    from opera_fetch.stack import _best_zone
-
-    a = make_burst(west=500_010, north=4_332_210, epsg=32612)
-    b = make_burst(west=500_010, north=4_332_210, epsg=32613)
-    assert _best_zone({32612: a, 32613: b}) == 32612
-    assert _best_zone({32613: b, 32612: a}) == 32612
-
-
-def test_utm_zone_of_an_area():
-    from shapely.geometry import box
-
-    from opera_fetch.stack import _utm_zone
-
-    assert _utm_zone(_aoi_in_zone_13()) == 32613
-    assert _utm_zone(box(-110.0, 38.85, -109.9, 38.95)) == 32612
-    assert _utm_zone(box(-70.0, -34.0, -69.9, -33.9)) == 32719   # south of the equator
-    assert _utm_zone(box(11.0, 58.0, 11.1, 58.1)) == 32632        # the plain rule, zone 32
-
-
-def test_utm_zone_does_not_claim_to_know_the_norway_exceptions():
-    """Norway widens 32V and Svalbard uses 31X/33X/35X/37X, which the plain rule misses.
-
-    Harmless, because the answer is only consulted when it names one of the tied zones, and
-    a zone this does not name simply falls through to the lower EPSG.
-    """
-    from shapely.geometry import box
-
-    from opera_fetch.stack import _best_zone, _utm_zone
-
-    svalbard = box(11.0, 78.0, 11.1, 78.1)
-    assert _utm_zone(svalbard) == 32632, "the plain rule, not Svalbard's 33X"
-
-    tied = {32633: make_burst(west=500_010, north=8_600_010, epsg=32633),
-            32635: make_burst(west=500_010, north=8_600_010, epsg=32635)}
-    assert _best_zone(tied, svalbard) == 32633, "falls through to the lower EPSG"
