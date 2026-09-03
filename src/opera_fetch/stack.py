@@ -123,7 +123,7 @@ def align_passes(bursts, tolerance=TOLERANCE):
 
 
 def assemble(paths, aoi=None, aoi_crs=None, bounds=None, how=None, tolerance=TOLERANCE,
-             chunks=None, extra=(), mask=False, reproject_to=None):
+             chunks=None, extra=(), mask=False, reproject_to=None, resampling="nearest"):
     """Read, mosaic and stack every burst among the given files, one Dataset per pass.
 
     Parameters
@@ -153,6 +153,10 @@ def assemble(paths, aoi=None, aoi_crs=None, bounds=None, how=None, tolerance=TOL
     reproject_to
         A CRS to put every zone on, returning a single Dataset instead of one per zone.
         This is the only resampling the package does, which is why it has to be asked for.
+    resampling
+        How that reprojection interpolates: any name from ``rasterio.enums.Resampling``.
+        Nearest by default, and the only one allowed for complex data, where averaging
+        neighbours averages their phases.
 
     Returns
     -------
@@ -228,7 +232,7 @@ def assemble(paths, aoi=None, aoi_crs=None, bounds=None, how=None, tolerance=TOL
         log.info("this AOI spans %d UTM zones, %s, which cannot share a grid. Pass "
                  "reproject_to to put them on one.", len(stacks), sorted(stacks))
     if reproject_to is not None:
-        return _onto_one_crs(stacks, reproject_to)
+        return _onto_one_crs(stacks, reproject_to, resampling)
     return stacks
 
 
@@ -283,20 +287,33 @@ def _all_equal(layers):
     return all(np.array_equal(first, other.values, equal_nan=True) for other in layers[1:])
 
 
-def _onto_one_crs(stacks, crs):
+def _onto_one_crs(stacks, crs, resampling="nearest"):
     """Every zone resampled onto one grid, as a single Dataset.
 
     The only resampling in the package, and the caller has to ask for it by name. The
     reference is the zone with the most acquisitions, so the largest part of the result is
-    still on a grid OPERA delivered. Nearest neighbour throughout: it moves values without
-    inventing any, and the mask is categorical so nothing else would do.
+    still on a grid OPERA delivered.
+
+    Nearest by default, which moves values without inventing any. Anything else averages
+    neighbours, and for complex data that destroys the measurement: interpolating the real
+    and imaginary parts of two pixels a fringe apart gives a number that is not a phase
+    either of them had. So a complex stack takes nearest and nothing else.
     """
     from rasterio.enums import Resampling
 
+    complex_data = any(np.issubdtype(stack[name].dtype, np.complexfloating)
+                       for stack in stacks.values() for name in stack.data_vars)
+    if complex_data and resampling != "nearest":
+        raise ValueError(
+            f"complex data can only be reprojected with nearest, not {resampling!r}: "
+            "averaging neighbouring pixels averages their phases, which is not a phase "
+            "anything measured. Take the amplitude first if you want a smooth result.")
+
+    how = Resampling[resampling]
     target = CRS.from_user_input(crs)
     reference = max(stacks.values(), key=lambda s: s.sizes["time"])
     if CRS.from_user_input(reference.rio.crs) != target:
-        reference = reference.rio.reproject(target, resampling=Resampling.nearest)
+        reference = reference.rio.reproject(target, resampling=how)
 
     moved = []
     for epsg, stack in sorted(stacks.items()):
@@ -305,8 +322,14 @@ def _onto_one_crs(stacks, crs):
             continue
         log.warning("resampling EPSG:%d onto %s, which is the one place this package "
                     "moves a value", epsg, target.to_string())
-        moved.append(_declare_mask_nodata(stack).rio.reproject_match(
-            reference, resampling=Resampling.nearest))
+        # The mask is categorical, so it moves by nearest whatever the data does.
+        masks = [name for name in stack.data_vars if name.endswith("mask")]
+        ready = _declare_mask_nodata(stack)
+        matched = ready.drop_vars(masks).rio.reproject_match(reference, resampling=how)
+        for name in masks:
+            matched[name] = ready[[name]].rio.reproject_match(
+                reference, resampling=Resampling.nearest)[name]
+        moved.append(matched)
 
     joined = xr.concat(moved, dim="time", join="outer").sortby("time")
 

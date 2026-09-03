@@ -2,7 +2,17 @@
 
 OPERA Sentinel-1 RTC and CSLC for an area and a date range, on OPERA's own grid.
 
-The six steps that every project repeats:
+[OPERA](https://www.jpl.nasa.gov/go/opera/), Observational Products for End-Users from
+Remote Sensing Analysis, is a NASA project at JPL that turns satellite data into products
+you can use without doing the SAR processing yourself. Its two Sentinel-1 products are
+[RTC-S1](https://www.jpl.nasa.gov/go/opera/products/rtc-product/), radiometrically terrain
+corrected backscatter, and CSLC-S1, coregistered single-look complex, both geocoded to UTM
+and delivered one burst at a time, free, through the
+[ASF DAAC](https://asf.alaska.edu/datasets/daac/opera/). The processing code is open at
+[github.com/opera-adt](https://github.com/opera-adt) and the granules are searchable in
+[ASF Vertex](https://search.asf.alaska.edu).
+
+This project uses these six steps to get OPERA data:
 
 1. name an area and a date range
 2. find what ASF has
@@ -51,19 +61,11 @@ the step that knows what it wants.
 
 The lattice is taken from the OPERA products themselves.
 
-### The dictionary is how the promise is kept
+### The dictionary is how we avoid reprojections
 
 OPERA assigns the UTM zone **per burst**. Over the East River, T049 and T129 arrive as
 EPSG:32612 while T056 and T151 arrive as EPSG:32613. That is the same ground with
 `x = 846675` in one and `x = 326445` in the other, so no single grid holds both.
-
-So there are only two honest things to do with that, and one dishonest one:
-
-| | |
-|---|---|
-| reproject one zone onto the other | resamples, which is the thing this package exists not to do |
-| refuse to handle it | fails on half the AOIs tried: of four mountain sites, two straddled a boundary |
-| **hand back one Dataset per zone** | nothing moves, and you decide what to do about it |
 
 Hence the return type:
 
@@ -71,36 +73,36 @@ Hence the return type:
 {32612: <xarray.Dataset>, 32613: <xarray.Dataset>}
 ```
 
-**It is a dictionary so that nothing has to be reprojected.** Not to group results, and
-not because passes are separate. Purely because two UTM zones cannot share x and y
-coordinates, and forcing them to would mean resampling every pixel of one of them.
+**We return a dictionary so that nothing has to be reprojected.** Two UTM zones cannot share x and y
+coordinates, and forcing them to would mean resampling every pixel of one of them which especially
+for the CSLCs should be done carefully and potentially not at all.
 
-Usually there is a single entry, and the zone is the only thing that ever forces a second.
-When it does, you can put them on one grid yourself, knowing you asked for it:
+Usually there is a single entry, and a large cross-zone AOI is the only thing that forces a second.
+When it does, you can ask for them to reprojected to the same UTM:
 
 ```python
 stacks = of.fetch_stacks(aoi, start, end, reproject_to="EPSG:32613")   # one Dataset
 ```
 
-### Within a zone, a track is never a reason for a second entry
+`reproject_to` is the only resampling in the package, which is why it has to be asked for
+by name. It moves the smaller zone onto the larger one's grid, so the larger part of the
+result is still on a grid OPERA delivered.
 
-OPERA's grid is constant inside a zone, so every track lands on it. **Every acquisition is
-one step on the time axis**, whichever track it came from, with `track` and `direction` as
-coordinates alongside:
+It resamples with **nearest** by default, which moves a value without inventing one.
+`resampling=` takes any name from `rasterio.enums.Resampling` if you would rather have
+something smoother for backscatter:
 
 ```python
-stack.sel(time=stack.track == 49)          # one track
-stack.sel(time=stack.direction == "ASCENDING")
+of.fetch_stacks(aoi, start, end, reproject_to="EPSG:32613", resampling="bilinear")
 ```
 
-Nothing is padded to make that work: four acquisitions across two tracks are four rows.
+Two things it will not let you do. **Complex data is nearest only.** Interpolating the real
+and imaginary parts of two pixels a fringe apart gives a number that is not a phase either
+of them had, so asking for anything else on a CSLC stack is an error rather than a quiet
+loss. Take the amplitude first if you want a smooth result.
 
-Ascending and descending still must not be *averaged* together, and neither must two
-tracks. That is a mosaic rule, and mosaicking happens per pass before any of this.
-
-`reproject_to` is the only resampling in the package, which is why it has to be asked for
-by name. It moves the smaller zone onto the larger one's grid, nearest neighbour, so no
-value is invented and the larger part of the result is still on a grid OPERA delivered.
+And **the mask always moves by nearest**, whatever the data does, because an interpolated
+class code is a code nobody observed.
 
 **Neighbouring bursts are acquired seconds apart.** That is enough to make every burst's
 time axis unique, and a mosaic of them an empty diagonal ribbon. `align_passes` collapses

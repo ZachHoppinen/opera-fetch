@@ -186,3 +186,70 @@ def test_reprojection_does_not_invent_a_mask_code():
     joined = _onto_one_crs({32612: a, 32613: b}, "EPSG:32613")
     codes = set(np.unique(joined.mask.values).tolist())
     assert codes <= {0, 1, 2, 3, 255}, codes
+
+
+def _complex_zones():
+    a = make_burst(west=500_010, north=4_332_210, epsg=32612)
+    b = make_burst(west=500_010, north=4_332_210, epsg=32613)
+    for stack, track in ((a, 49), (b, 56)):
+        values = (stack.vv.values + 1j).astype("complex64")
+        stack["vv"] = (stack.vv.dims, values)
+        stack.coords["track"] = ("time", [track] * stack.sizes["time"])
+    return {32612: a, 32613: b}
+
+
+def test_complex_survives_being_reprojected():
+    """Nearest moves a sample. Anything else would average two phases into a third."""
+    from opera_fetch.stack import _onto_one_crs
+
+    joined = _onto_one_crs(_complex_zones(), "EPSG:32613")
+    assert np.issubdtype(joined.vv.dtype, np.complexfloating)
+
+    finite = joined.vv.values[np.isfinite(joined.vv.values)]
+    assert finite.size
+    assert np.any(finite.imag != 0), "the imaginary part was dropped somewhere"
+
+
+def test_complex_refuses_any_resampling_but_nearest():
+    import pytest
+
+    from opera_fetch.stack import _onto_one_crs
+
+    with pytest.raises(ValueError, match="averages their phases"):
+        _onto_one_crs(_complex_zones(), "EPSG:32613", resampling="bilinear")
+
+
+def test_the_mask_moves_by_nearest_whatever_the_data_does():
+    """A class code interpolated with its neighbours is a code nobody observed."""
+    from opera_fetch.stack import _onto_one_crs
+
+    a = make_burst(west=500_010, north=4_332_210, epsg=32612)
+    b = make_burst(west=500_010, north=4_332_210, epsg=32613)
+    a["mask"][:] = 2
+    b["mask"][:] = 0
+
+    joined = _onto_one_crs({32612: a, 32613: b}, "EPSG:32613", resampling="bilinear")
+    codes = set(np.unique(joined.mask.values).tolist())
+    assert codes <= {0, 1, 2, 3, 255}, codes
+    assert joined.mask.dtype == np.uint8
+
+
+def test_a_complex_mosaic_keeps_its_coordinate_types():
+    """combine_first aligns and fills, which floats an int coordinate and objects a string."""
+    from opera_fetch.mosaic import mosaic
+
+    a, b = two_complex_bursts()
+    merged = mosaic([a, b])
+    assert merged.track.dtype == np.int64
+    assert merged.platform.dtype.kind == "U", merged.platform.dtype
+
+
+def two_complex_bursts():
+    a = make_burst(west=500_010, north=4_332_210, columns=8)
+    b = make_burst(west=500_010 + 4 * 30, north=4_332_210, columns=8)
+    b.attrs["burst_id"] = "T049-103328-IW3"
+    for stack in (a, b):
+        stack["vv"] = (stack.vv.dims, (stack.vv.values + 1j).astype("complex64"))
+        stack.coords["platform"] = ("time", ["S1A"] * stack.sizes["time"])
+        stack.coords["track"] = ("time", np.full(stack.sizes["time"], 49, dtype="int64"))
+    return a, b

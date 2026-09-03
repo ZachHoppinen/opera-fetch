@@ -123,7 +123,12 @@ def _first(placed):
     First is by burst ID, which is the order ``stack.assemble`` reads them in. Arbitrary,
     but fixed: the same bursts always give the same mosaic.
     """
-    return _keep_attrs(reduce(lambda a, b: a.combine_first(b), placed), placed[0])
+    combined = reduce(lambda a, b: a.combine_first(b), placed)
+
+    # combine_first aligns and fills, which promotes an integer coordinate to float and a
+    # string one to object. Every burst carries the same ones, so put them back as they were.
+    kept = {name: placed[0][name] for name in placed[0].coords if name not in combined.dims}
+    return _keep_attrs(combined.assign_coords(kept), placed[0])
 
 
 def _keep_attrs(combined, reference):

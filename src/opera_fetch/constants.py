@@ -68,6 +68,7 @@ ARCHIVE_START = "2016-01-01"
 
 # Sentinel-1B failed in December 2021 and 1C only reached operations in 2025, so a range
 # inside that gap has roughly half the acquisitions a range either side of it does.
+#TODO do we need this for some reason?
 ONE_SATELLITE = ("2021-12-23", "2025-03-01")
 
 # T049-103327-IW3 in a filename, t049_103327_iw3 inside an HDF5.
