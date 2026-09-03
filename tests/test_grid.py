@@ -121,3 +121,24 @@ def test_mosaicking_bursts_off_one_lattice_is_refused():
 
     with pytest.raises(ValueError, match="T049-103328-IW3 is not on the same lattice"):
         mosaic([anchor, stray])
+
+
+def test_a_single_pixel_grid_works():
+    """A one-cell time series is an ordinary thing to ask for, and the spacing is known
+    from the attributes rather than from a coordinate difference that does not exist."""
+    from opera_fetch.grid import bounds_of, spacing_of
+
+    one = make_burst(west=500_010, north=4_332_210, columns=1, rows=1, fill=7.0)
+    assert spacing_of(one) == (30.0, 30.0)
+    assert bounds_of(one) == (500_010, 4_332_180, 500_040, 4_332_210)
+
+    placed = place(one, grid_like([one]))
+    assert placed.sizes == {"time": 2, "y": 1, "x": 1}
+    assert float(placed.vv.isel(time=0, y=0, x=0)) == 7.0
+
+
+def test_a_grid_with_no_spacing_to_read_says_so():
+    one = make_burst(west=500_010, north=4_332_210, columns=1, rows=1)
+    del one.attrs["spacing"]
+    with pytest.raises(ValueError, match="nothing to read the posting from"):
+        spacing_of(one)

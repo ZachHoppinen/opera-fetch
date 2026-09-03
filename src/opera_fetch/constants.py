@@ -85,6 +85,7 @@ GRANULE = re.compile(
     r"(_(?P<polarization>VV|VH|HH|HV))?",
     re.IGNORECASE)
 
-# Longest first, so RTC-S1-STATIC is never read as RTC-S1.
+# Matched as _<token>_, so RTC-S1 cannot be found inside RTC-S1-STATIC and the order of
+# this mapping does not matter.
 PRODUCT_TOKEN = {"RTC-S1-STATIC": RTC_STATIC, "CSLC-S1-STATIC": CSLC_STATIC,
                  "RTC-S1": RTC, "CSLC-S1": CSLC}

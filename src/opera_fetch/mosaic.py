@@ -38,10 +38,6 @@ def mosaic(bursts, bounds=None, how=None):
         raise ValueError("no bursts to mosaic")
     _one_pass(bursts)
 
-    if len(bursts) == 1 and bounds is None:
-        bursts[0].attrs["bursts"] = 1
-        return bursts[0]
-
     # What the data is decides how overlaps combine, unless the caller says otherwise.
     complex_data = any(np.issubdtype(burst[name].dtype, np.complexfloating)
                        for burst in bursts for name in burst.data_vars)
@@ -98,7 +94,9 @@ def _mean(placed):
         weights = looks.fillna(typical).fillna(1.0)
         combined = data.drop_vars(const.LOOKS).weighted(weights).mean(dim="burst")
         # The looks behind a mosaicked pixel are all the looks that went into it.
-        combined[const.LOOKS] = looks.sum(dim="burst", skipna=True)
+        # min_count so a cell no burst knows stays unknown: summing nothing gives 0, and
+        # zero looks is a real value that means something else entirely.
+        combined[const.LOOKS] = looks.sum(dim="burst", skipna=True, min_count=1)
     else:
         log.debug("no %s layer, so bursts are averaged flat", const.LOOKS)
         combined = data.mean(dim="burst", skipna=True)

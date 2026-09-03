@@ -21,6 +21,7 @@ from pyproj import CRS
 from opera_fetch import constants as const
 from opera_fetch import cslc, filenames, rtc
 from opera_fetch.aoi import as_geometry
+from opera_fetch.errors import NoAcquisitions
 from opera_fetch.grid import clip, reproject
 from opera_fetch.mosaic import mosaic
 
@@ -72,12 +73,13 @@ def read_bursts(paths, chunks=None, extra=()):
             options["chunks"] = chunks
         try:
             bursts.append(reader.read_burst(group, **options))
-        except ValueError as err:
+        except NoAcquisitions as err:
             # A burst with static layers cached but no acquisitions in this date range is
-            # ordinary, and should not take the other bursts down with it.
+            # ordinary, and should not take the other bursts down with it. Anything else a
+            # reader raises means the data is wrong, and is left to travel.
             log.warning("skipping %s: %s", burst_id, err)
     if not bursts:
-        raise ValueError("no readable OPERA bursts among the given paths")
+        raise NoAcquisitions("no readable OPERA bursts among the given paths")
     return bursts
 
 
@@ -119,13 +121,42 @@ def assemble(paths, aoi=None, aoi_crs=None, bounds=None, how=None, tolerance=TOL
              chunks=None, extra=(), mask=False):
     """Read, mosaic and stack every burst among the given files, one Dataset per pass.
 
-    aoi cuts the result down to an area, and is worth giving: without it the grid spans
-    every burst, which for a whole track is mostly empty space. mask additionally blanks
-    what falls outside the AOI polygon rather than outside its bounding box.
+    Parameters
+    ----------
+    paths
+        Downloaded RTC, RTC-STATIC, CSLC or CSLC-STATIC files, in any mixture. They are
+        grouped by burst, and anything that is not a data file is ignored.
+    aoi, aoi_crs
+        The area to cut down to, and the projection its coordinates are in. Worth giving:
+        without it the grid spans every burst, which for a whole track is mostly empty
+        space.
+    bounds
+        The same thing as (west, south, east, north) already in the bursts' projection.
+        An alternative to aoi, not a companion: giving both is an error, and bounds cannot
+        be used when the bursts span more than one UTM zone.
+    how
+        ``"mean"`` or ``"first"`` where bursts overlap, defaulting to ``"mean"`` for real
+        data and ``"first"`` for complex, whose phases share no datum.
+    tolerance
+        How close two acquisitions must be to count as one overpass.
+    chunks
+        Dask chunk size in pixels, passed to the reader.
+    extra
+        Names of the large per-acquisition CSLC phase screens to carry along as well.
+    mask
+        Also blank what falls outside the AOI polygon, rather than outside its bounding box.
 
-    Nothing is resampled, so each Dataset comes back on OPERA's own lattice in the
-    projection its bursts were delivered in.
+    Returns
+    -------
+    dict of {Pass: xarray.Dataset}
+        Nothing is resampled, so each Dataset is on OPERA's own lattice in the projection
+        its bursts were delivered in.
     """
+    # Checked before anything is read, so a bad call costs nothing.
+    if bounds is not None and aoi is not None:
+        raise ValueError("give an aoi or bounds, not both: they both say what area to "
+                         "deliver, and the aoi would win")
+
     # Split the bursts along the boundaries one grid cannot cross.
     grouped = defaultdict(list)
     for burst in read_bursts(paths, chunks=chunks, extra=extra):

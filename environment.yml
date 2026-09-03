@@ -2,6 +2,8 @@ name: opera-fetch
 channels:
   - conda-forge
 dependencies:
+  # 3.14 writes netCDF correctly but ends in sys.excepthook noise at interpreter
+  # shutdown, from rasterio/dask/h5py rather than from this package.
   - python=3.12
   - asf_search
   - dask

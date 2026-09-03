@@ -63,13 +63,12 @@ def _to_shapely(aoi):
     if isinstance(aoi, shapely.geometry.base.BaseGeometry):
         return aoi, None
 
-    # A GeoDataFrame or a GeoSeries, without importing geopandas to find out. On the
-    # frame the geometries are a column; on the series they are the object itself.
+    # A GeoDataFrame or a GeoSeries, without importing geopandas to find out. Both answer
+    # .geometry with a GeoSeries; on the series it is the object itself.
     if hasattr(aoi, "geometry") and hasattr(aoi, "crs"):
-        shapes = aoi.geometry if hasattr(aoi.geometry, "union_all") else aoi
-        if len(shapes) == 0:
+        if len(aoi.geometry) == 0:
             raise ValueError("AOI has no geometries in it")
-        return shapes.union_all(), aoi.crs
+        return aoi.geometry.union_all(), aoi.crs
 
     if isinstance(aoi, (str, Path)):
         if Path(aoi).exists():

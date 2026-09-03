@@ -16,6 +16,7 @@ import xarray as xr
 
 from opera_fetch import constants as const
 from opera_fetch import filenames
+from opera_fetch.errors import NoAcquisitions
 from opera_fetch.grid import place
 
 log = logging.getLogger(__name__)
@@ -37,7 +38,7 @@ def read_burst(paths, chunks=CHUNK):
     paths = [p for p in paths if filenames.parse_product(p) in (const.RTC, const.RTC_STATIC)]
     granules = _granules(paths)
     if not granules:
-        raise ValueError("no OPERA RTC acquisitions among the given paths")
+        raise NoAcquisitions("no OPERA RTC acquisitions among the given paths")
 
     found = {layer.lower() for files in granules.values() for layer in files}
     if not found & set(POLARIZATIONS):

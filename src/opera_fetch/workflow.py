@@ -1,21 +1,27 @@
 """The six steps in one call. Each of them is public and can be run on its own."""
 
 import logging
+from pathlib import Path
 
 from opera_fetch import constants as const
 from opera_fetch.aoi import as_geometry
 from opera_fetch.download import download
 from opera_fetch.search import data_urls, search, search_static
-from opera_fetch.stack import assemble
-from opera_fetch.validate import report
+from opera_fetch.stack import TOLERANCE, assemble
+from opera_fetch.validate import check_files, report, summary
 from opera_fetch.write import write
 
 log = logging.getLogger(__name__)
 
 
+def cache_dir_path(cache_dir, url):
+    """Where download puts a URL, so a re-fetch can be matched back to it."""
+    return Path(cache_dir) / Path(url).name
+
+
 def fetch_stacks(aoi, start=None, end=None, product=const.RTC, cache_dir="data/raw/opera",
                  aoi_crs=None, static=True, layers=None, static_layers=None, track=None,
-                 direction=None, out=None, mask=False, how=None, tolerance="10min",
+                 direction=None, out=None, mask=False, how=None, tolerance=TOLERANCE,
                  chunks=None, extra=(), max_workers=10):
     """Search, download, mosaic, stack, clip and check. One Dataset per pass.
 
@@ -124,14 +130,30 @@ def fetch_stacks(aoi, start=None, end=None, product=const.RTC, cache_dir="data/r
     log.info("step 3/6  downloading %d files", len(urls))
     paths = download(urls, cache_dir, max_workers=max_workers)
 
+    # The cache may hold a file some earlier run left half written, which the
+    # exists-and-not-empty check reads as done. Opening them says otherwise.
+    broken = check_files(paths)
+    if broken:
+        log.warning("%d cached file(s) do not read; fetching them again", len(broken))
+        for path in broken:
+            path.unlink(missing_ok=True)
+        again = [url for url in urls if cache_dir_path(cache_dir, url) in set(broken)]
+        download(again, cache_dir, max_workers=max_workers)
+        still_broken = check_files(broken)
+        if still_broken:
+            raise OSError(f"{len(still_broken)} files will not read after a second "
+                          f"attempt: {', '.join(p.name for p in still_broken[:3])}")
+
     # assemble does both: bursts are mosaicked and the result stacked in time.
     log.info("step 4/6 and 5/6  mosaicking bursts and stacking them in time")
     stacks = assemble(paths, aoi=aoi, how=how, tolerance=tolerance, chunks=chunks,
                       extra=extra, mask=mask)
 
     log.info("step 6/6  clipped to the AOI; checking")
-    for stack in stacks.values():
+    for key, stack in stacks.items():
+        # report raises on damage; summary is what makes the step visible.
         report(stack, aoi=aoi)
+        log.info("%s\n%s", key, summary(stack, aoi=aoi))
 
     if out is not None:
         write(stacks, out)

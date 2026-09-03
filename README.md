@@ -22,9 +22,11 @@ stacks = of.fetch_stacks((-107.0, 38.85, -106.85, 38.95), "2024-11-01", "2024-11
 ```
 T049 ascending EPSG:32612
 grid       390 by 451 at (30.0, 30.0) m, EPSG:32612
-variables  vh, vv, local_incidence_angle, mask
+variables  vh, vv, local_incidence_angle, number_of_looks, mask
+bursts     1
 times      2 from 2024-11-09 to 2024-11-21
 coverage   100% of cells finite, median over time
+aoi        100% of the AOI is inside the grid
 ```
 
 Every step is public, and worth reaching for on its own when a search wants looking at
@@ -98,7 +100,11 @@ but no-observation is 255 for RTC (uint8) and 127 for CSLC (int8).
 | `RTC` | 30 m | `vv`, `vh` or `hh`, `hv`, plus `mask`, linear gamma0 |
 | `RTC_STATIC` | 30 m | `local_incidence_angle` in radians, `number_of_looks`, more on request |
 | `CSLC` | 5 by 10 m | `vv` or `hh`, `complex64` |
-| `CSLC_STATIC` | 5 by 10 m | `local_incidence_angle`, `layover_shadow_mask`, `los_east`, `los_north` |
+| `CSLC_STATIC` | 5 by 10 m | `local_incidence_angle`, `mask`, `los_east`, `los_north` |
+
+A CSLC stack therefore comes back with `vv` (or `hh`) alongside `local_incidence_angle`,
+`mask`, `los_east` and `los_north`; an RTC one with `vv`, `vh`, `local_incidence_angle`,
+`number_of_looks` and `mask`.
 
 What varies between acquisitions rides on the time axis as a coordinate: `platform`
 (S1A, S1B, S1C) and `absolute_orbit`, which is what a baseline is worked out from. What is
@@ -171,6 +177,13 @@ machine urs.earthdata.nasa.gov login <user> password <password>
 Downloading uses threads rather than processes, so there is nothing platform-specific in
 it and it should run anywhere Python does. It has only been tested on macOS. On Windows the
 credentials file is `~/_netrc`, which `requests` looks for alongside `.netrc`.
+
+Any environment with the dependencies will do; the one in `environment.yml` is only the one
+that is known to work. **On Python 3.14, writing netCDF ends in dozens of lines of `Error in
+sys.excepthook:` with nothing after them.** The file is written correctly and the exit code
+is zero. It is an interpreter-shutdown interaction between rasterio, dask and h5py, not this
+package: the same code outside it does the same thing, and on 3.11 and 3.12 it does not
+happen at all. Measured on the RTC example: 62 such lines on 3.14, none on 3.11.
 
 ## Tests
 

@@ -22,10 +22,32 @@ log = logging.getLogger(__name__)
 
 
 def spacing_of(obj):
-    """The (x, y) posting of a grid, positive, in its own units."""
+    """The (x, y) posting of a grid, positive, in its own units.
+
+    From the attribute where the object carries one, because a one-cell grid has no
+    coordinate difference to read and a single-pixel time series is an ordinary thing to
+    ask this package for.
+    """
+    spacing = obj.attrs.get("spacing")
+    if spacing is not None:
+        return (float(spacing[0]), float(spacing[1]))
+
     if obj.sizes["x"] < 2 or obj.sizes["y"] < 2:
-        raise ValueError("cannot read a spacing from a grid under two pixels across")
+        raise ValueError(
+            "this grid is one pixel across and carries no spacing attribute, so there is "
+            "nothing to read the posting from")
     return (float(abs(obj.x[1] - obj.x[0])), float(abs(obj.y[1] - obj.y[0])))
+
+
+def bounds_of(obj):
+    """The outer pixel edges of a grid, as (west, south, east, north).
+
+    Not ``rio.bounds()``: that reads the resolution off a coordinate difference, which a
+    one-pixel grid has not got.
+    """
+    dx, dy = spacing_of(obj)
+    return (float(obj.x.min()) - dx / 2, float(obj.y.min()) - dy / 2,
+            float(obj.x.max()) + dx / 2, float(obj.y.max()) + dy / 2)
 
 
 def grid_like(bursts, bounds=None):
@@ -55,7 +77,8 @@ def grid_like(bursts, bounds=None):
         raise ValueError(f"bounds {(west, south, east, north)} are under one pixel across")
 
     grid = xr.DataArray(np.zeros((y.size, x.size), dtype="int8"),
-                        dims=("y", "x"), coords={"y": y, "x": x}, name="grid")
+                        dims=("y", "x"), coords={"y": y, "x": x}, name="grid",
+                        attrs={"spacing": (dx, dy)})
     return grid.rio.write_crs(anchor.rio.crs)
 
 
@@ -95,12 +118,12 @@ def clip(obj, aoi, crs=None, mask=False):
     target = CRS.from_user_input(obj.rio.crs)
     geometry = reproject(as_geometry(aoi, crs), target)
 
-    left, bottom, right, top = obj.rio.bounds()
+    left, bottom, right, top = bounds_of(obj)
     west, south, east, north = geometry.bounds
     if left >= east or right <= west or bottom >= north or top <= south:
         raise ValueError(
             f"the AOI does not overlap the data: AOI {_round(geometry.bounds)} against "
-            f"data {_round(obj.rio.bounds())} in {target.to_string()}")
+            f"data {_round(bounds_of(obj))} in {target.to_string()}")
 
     cut = place(obj, grid_like([obj], bounds=geometry.bounds))
     if mask:
@@ -144,7 +167,7 @@ def _aligned(a, b, step):
 
 def _union(bursts):
     """Bounds covering every burst."""
-    corners = np.array([burst.rio.bounds() for burst in bursts])
+    corners = np.array([bounds_of(burst) for burst in bursts])
     west, south = corners[:, 0].min(), corners[:, 1].min()
     east, north = corners[:, 2].max(), corners[:, 3].max()
     return west, south, east, north

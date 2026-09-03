@@ -21,6 +21,8 @@ def download(urls, cache_dir, max_workers=10, retries=3, timeout=60, session=Non
     keep-alive session is shared across the pool.
     """
     urls = list(urls)
+    if retries < 1:
+        raise ValueError(f"retries is how many attempts to make, so at least 1, not {retries}")
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
 

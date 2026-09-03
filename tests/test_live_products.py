@@ -20,6 +20,7 @@ import random
 from datetime import UTC, date, datetime, timedelta
 
 import numpy as np
+import pandas as pd
 import pytest
 
 import opera_fetch as of
@@ -103,7 +104,7 @@ def test_every_granule_name_still_parses(case):
             fields = filenames.parse_fields(file_id + "_x.tif")
             assert fields["burst_id"] == filenames.parse_burst_id(file_id)
             assert fields["sensor"].startswith("S1")
-            assert filenames.parse_processing_time(file_id + "_x.tif") is not None
+            assert pd.notna(filenames.parse_processing_time(file_id + "_x.tif"))
 
 
 def test_an_rtc_burst_still_has_a_static_layer_to_join_to(case):

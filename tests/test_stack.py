@@ -71,3 +71,43 @@ def test_a_stack_records_what_it_was_built_from():
     assert merged.attrs["granules"].split("\n") == [
         "OPERA_L2_RTC-S1_T049-103327-IW3_A", "OPERA_L2_RTC-S1_T049-103328-IW3_B"]
     assert const.__version__
+
+
+def test_a_misaligned_burst_is_not_swallowed_as_an_empty_one():
+    """read_bursts skips a burst with nothing in it. A burst whose acquisitions do not
+    share a grid is a different thing, and must not vanish with one warning."""
+    import pytest
+
+    from opera_fetch.errors import NoAcquisitions
+    from opera_fetch.stack import read_bursts
+
+    assert issubclass(NoAcquisitions, ValueError), "callers catching ValueError still work"
+
+    class Misaligned(ValueError):
+        pass
+
+    def explode(paths, **kwargs):
+        raise Misaligned("acquisitions are not on the same grid")
+
+    import opera_fetch.rtc as rtc_module
+    original = rtc_module.read_burst
+    rtc_module.read_burst = explode
+    try:
+        with pytest.raises(Misaligned):
+            read_bursts([
+                "OPERA_L2_RTC-S1_T049-103327-IW3_20241004T011054Z_"
+                "20241004T043235Z_S1A_30_v1.0_VV.tif"])
+    finally:
+        rtc_module.read_burst = original
+
+
+def test_an_aoi_and_bounds_together_are_refused():
+    """Both say what area to deliver, and bounds used to lose without a word."""
+    import pytest
+
+    from opera_fetch.stack import assemble
+
+    with pytest.raises(ValueError, match="not both"):
+        assemble(["OPERA_L2_RTC-S1_T049-103327-IW3_20241004T011054Z_"
+                  "20241004T043235Z_S1A_30_v1.0_VV.tif"],
+                 aoi=(-107.0, 38.8, -106.9, 38.9), bounds=(0, 0, 1, 1))

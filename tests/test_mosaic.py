@@ -130,3 +130,26 @@ def test_an_unknown_look_count_does_not_drop_the_burst_from_that_cell():
     assert float(merged.vv.isel(time=0, y=0, x=6)) == pytest.approx(3.0)
     # and a cell only a reaches keeps its value rather than going empty.
     assert float(merged.vv.isel(time=0, y=0, x=0)) == pytest.approx(2.0)
+
+
+def test_a_single_burst_mosaic_leaves_the_caller_alone():
+    """Every other path returns something new; this one used to hand back the input."""
+    one = make_burst(west=500_010, north=4_332_210)
+    before = dict(one.attrs)
+
+    merged = mosaic([one])
+    assert merged is not one
+    assert one.attrs == before, "the caller's burst was mutated"
+    assert merged.attrs["bursts"] == 1
+    assert np.array_equal(merged.vv.values, one.vv.values, equal_nan=True)
+
+
+def test_looks_nobody_knows_stay_unknown():
+    """Summing nothing gives zero, and zero looks means something else entirely."""
+    a, b = two_overlapping_bursts()
+    for burst in (a, b):
+        burst["number_of_looks"] = (("y", "x"),
+                                    np.full((burst.sizes["y"], burst.sizes["x"]), np.nan))
+
+    merged = mosaic([a, b])
+    assert np.isnan(float(merged.number_of_looks.isel(y=0, x=6)))

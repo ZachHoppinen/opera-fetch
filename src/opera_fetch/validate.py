@@ -10,7 +10,7 @@ from pathlib import Path
 
 import numpy as np
 
-from opera_fetch.grid import reproject, spacing_of
+from opera_fetch.grid import bounds_of, reproject, spacing_of
 
 log = logging.getLogger(__name__)
 
@@ -189,5 +189,5 @@ def _aoi_fraction(stack, aoi):
     from opera_fetch.aoi import as_geometry
 
     geometry = reproject(as_geometry(aoi), stack.rio.crs)
-    covered = geometry.intersection(box(*stack.rio.bounds()))
+    covered = geometry.intersection(box(*bounds_of(stack)))
     return float(covered.area / geometry.area) if geometry.area else float("nan")

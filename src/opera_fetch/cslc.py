@@ -14,6 +14,7 @@ import xarray as xr
 
 from opera_fetch import constants as const
 from opera_fetch import filenames
+from opera_fetch.errors import NoAcquisitions
 from opera_fetch.grid import place
 
 log = logging.getLogger(__name__)
@@ -31,7 +32,7 @@ def read_burst(paths, chunks=CHUNK, extra=()):
     paths = [p for p in paths if filenames.parse_product(p) in (const.CSLC, const.CSLC_STATIC)]
     acquisitions = [p for p in sorted(paths) if filenames.parse_product(p) == const.CSLC]
     if not acquisitions:
-        raise ValueError("no OPERA CSLC acquisitions among the given paths")
+        raise NoAcquisitions("no OPERA CSLC acquisitions among the given paths")
 
     bursts = {filenames.parse_burst_id(path) for path in paths}
     if len(bursts) > 1:

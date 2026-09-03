@@ -84,3 +84,10 @@ def test_a_search_with_no_results_is_an_empty_frame_not_a_crash():
     assert list(found.columns)
     assert found.empty or len(found) > 0
     assert "burst_id" in found.columns
+
+
+@pytest.mark.parametrize("retries", [0, -1])
+def test_a_retry_count_under_one_is_refused(retries):
+    """range(1, 1) is empty, so the search was never made and the result never bound."""
+    with pytest.raises(ValueError, match="at least 1"):
+        search(aoi=AOI, start=WINDOW[0], end=WINDOW[1], retries=retries)

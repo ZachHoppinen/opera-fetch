@@ -62,6 +62,8 @@ def search(aoi=None, start=None, end=None, product=const.RTC, burst_id=None, tra
         raise ValueError(f"{product!r} is not one of {const.PRODUCTS}")
     if aoi is None and burst_id is None:
         raise ValueError("give an aoi, a burst_id, or both")
+    if retries < 1:
+        raise ValueError(f"retries is how many attempts to make, so at least 1, not {retries}")
 
     import asf_search as asf
 
