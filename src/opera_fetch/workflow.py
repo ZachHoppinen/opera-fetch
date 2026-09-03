@@ -66,16 +66,23 @@ def fetch_stacks(aoi, start=None, end=None, product=const.RTC, cache_dir="data/r
     max_workers
         Parallel downloads.
 
+    reproject_to
+        A CRS to put every zone on, giving one Dataset instead of one per zone. The only
+        resampling in the package, which is why it has to be asked for by name.
+
     Returns
     -------
-    dict of {Pass: xarray.Dataset}
-        One entry per track, pass direction and UTM zone, since those are the boundaries a
-        single grid cannot cross. Each Dataset is on OPERA's own lattice, in the projection
-        its bursts were delivered in. Nothing is resampled anywhere.
+    dict of {int: xarray.Dataset}
+        One entry per UTM zone, keyed by EPSG. Usually one; an AOI straddling a zone
+        boundary gives two, because OPERA assigns the zone per burst and no single grid
+        holds both. Nothing is resampled unless reproject_to says so.
 
-        RTC gives ``vv``, ``vh``, ``mask`` as linear gamma0, unmasked. CSLC gives complex
-        ``vv`` or ``vh``. ``platform`` and ``absolute_orbit`` are coordinates on the time
-        axis; ``track``, ``direction``, ``epsg`` and ``footprint`` are attributes.
+        Every acquisition is one step on the time axis, whichever track it came from, with
+        ``track``, ``direction``, ``platform`` and ``absolute_orbit`` as coordinates
+        alongside it. Selecting a track is ``stack.sel(time=stack.track == 49)``.
+
+        RTC gives ``vv``, ``vh`` or ``hh``, ``hv``, plus ``mask``, as linear gamma0 and
+        unmasked. CSLC gives complex ``vv`` or ``hh``.
 
     Examples
     --------
@@ -86,14 +93,19 @@ def fetch_stacks(aoi, start=None, end=None, product=const.RTC, cache_dir="data/r
         stacks = of.fetch_stacks((-107.0, 38.85, -106.85, 38.95), "2024-11-01", "2024-11-30",
                                  cache_dir="data/raw/east_river",
                                  out="data/processed/east_river.nc")
-        for key, stack in stacks.items():
-            print(key, of.summary(stack))
+        for epsg, stack in stacks.items():
+            print(epsg, of.summary(stack))
+
+    Everything over one AOI on a single grid, resampling the smaller zone::
+
+        stack = of.fetch_stacks(aoi, "2024-11-01", "2024-11-30",
+                                reproject_to="EPSG:32613")
 
     One descending track only, from a shapefile, with the layover/shadow mask applied::
 
         stacks = of.fetch_stacks("aoi/east_river.shp", "2024-10-01", "2025-06-30",
                                  track=56, direction="DESCENDING")
-        stack = stacks[of.Pass(56, "DESCENDING", 32613)]
+        stack = stacks[32613]
         clear = stack.where(stack.mask == 0)
 
     Complex data, which belongs in Zarr::

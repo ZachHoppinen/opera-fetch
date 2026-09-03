@@ -60,10 +60,11 @@ def test_two_bursts_assemble_into_one_stack(rtc_two_bursts):
     stacks = assemble(rtc_two_bursts)
     assert len(stacks) == 1
 
-    # Whichever track the fixture found: the properties are what matter, not the number.
-    (key, stack), = stacks.items()
-    assert key.direction in ("ASCENDING", "DESCENDING")
-    assert 32600 < key.epsg < 32800, "OPERA delivers in UTM"
+    # Keyed by UTM zone, and whichever zone the fixture found is the one that matters.
+    (epsg, stack), = stacks.items()
+    assert 32600 < epsg < 32800, "OPERA delivers in UTM"
+    assert stack.rio.crs.to_epsg() == epsg
+    assert set(np.unique(stack.direction.values)) <= {"ASCENDING", "DESCENDING"}
     assert stack.attrs["bursts"] >= 2
     assert spacing_of(stack) == (30.0, 30.0)
     assert stack.indexes["time"].is_unique, "the bursts should share pass timestamps"

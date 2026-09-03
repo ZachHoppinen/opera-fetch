@@ -32,7 +32,11 @@ TOLERANCE = "10min"
 
 
 class Pass(NamedTuple):
-    """One track, one pass direction and one UTM zone: as far as one grid can reach."""
+    """One track, one direction, one zone: as much as a single mosaic may span.
+
+    The unit bursts are averaged over, not the unit results come back in. Two tracks of one
+    zone share a grid and end up in one Dataset; what they must not share is a mosaic.
+    """
 
     track: int
     direction: str
