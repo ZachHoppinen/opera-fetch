@@ -122,7 +122,7 @@ def align_passes(bursts, tolerance=TOLERANCE):
     return aligned
 
 
-def assemble(paths, aoi=None, aoi_crs=None, bounds=None, how=None, tolerance=TOLERANCE,
+def assemble(paths, aoi=None, aoi_crs=None, how=None, tolerance=TOLERANCE,
              chunks=None, extra=(), mask=False, reproject_to=None, resampling=None):
     """Read, mosaic and stack every burst among the given files, one Dataset per pass.
 
@@ -134,11 +134,7 @@ def assemble(paths, aoi=None, aoi_crs=None, bounds=None, how=None, tolerance=TOL
     aoi, aoi_crs
         The area to cut down to, and the projection its coordinates are in. Worth giving:
         without it the grid spans every burst, which for a whole track is mostly empty
-        space.
-    bounds
-        The same thing as (west, south, east, north) already in the bursts' projection.
-        An alternative to aoi, not a companion: giving both is an error, and bounds cannot
-        be used when the bursts span more than one UTM zone.
+        space. For an exact UTM box, pass it as the aoi with aoi_crs set to that zone.
     how
         ``"mean"`` or ``"first"`` where bursts overlap, defaulting to ``"mean"`` for real
         data and ``"first"`` for complex, whose phases share no datum.
@@ -172,11 +168,6 @@ def assemble(paths, aoi=None, aoi_crs=None, bounds=None, how=None, tolerance=TOL
 
         With reproject_to, a single Dataset on that CRS instead.
     """
-    # Checked before anything is read, so a bad call costs nothing.
-    if bounds is not None and aoi is not None:
-        raise ValueError("give an aoi or bounds, not both: they both say what area to "
-                         "deliver, and the aoi would win")
-
     # A pass is what may be averaged together: one track, one direction, one zone.
     # Ascending and descending land on the same day and must not be mixed in a mosaic.
     passes = defaultdict(list)
@@ -186,13 +177,6 @@ def assemble(paths, aoi=None, aoi_crs=None, bounds=None, how=None, tolerance=TOL
 
     if aoi is not None:
         aoi = as_geometry(aoi, aoi_crs)
-    zones = {key.epsg for key in passes}
-    if bounds is not None and len(zones) > 1:
-        raise ValueError(
-            f"bounds are in one projection, but these bursts span {sorted(zones)}. "
-            "Give an aoi instead, which is reprojected per zone, or assemble one zone "
-            "at a time.")
-
     mosaicked = defaultdict(list)
     for key, group in sorted(passes.items()):
         wanted = _overlapping(group, aoi) if aoi is not None else group
@@ -203,7 +187,7 @@ def assemble(paths, aoi=None, aoi_crs=None, bounds=None, how=None, tolerance=TOL
         # Sizing the grid from the AOI keeps a whole track from being mostly empty space.
         # Every pass of a zone gets the same bounds, and they are already on one lattice,
         # so the grids come out identical and the passes concatenate without resampling.
-        area = bounds if aoi is None else reproject(aoi, key.epsg).bounds
+        area = None if aoi is None else reproject(aoi, key.epsg).bounds
         stack = mosaic(align_passes(wanted, tolerance), bounds=area, how=how)
         if aoi is not None and mask:
             stack = clip(stack, aoi, mask=True)
@@ -289,24 +273,30 @@ def _all_equal(layers):
 
 
 def _onto_one_crs(stacks, crs, resampling=None):
-    """Every zone resampled onto one grid, as a single Dataset.
+    """Every zone onto the grid the caller asked for, as a single Dataset.
 
-    The only resampling in the package, and the caller has to ask for it by name. The
-    reference is the zone with the most acquisitions, so the largest part of the result is
-    still on a grid OPERA delivered.
+    A zone already in that CRS is the reference and is not touched, so the result stays on
+    the grid OPERA delivered and only the other zones move. Ask for a CRS no zone is in and
+    everything moves, onto a grid derived from the busiest zone, which is nobody's lattice.
 
-    The kernel depends on what the numbers mean, so the default does too. Complex data gets
-    lanczos, a windowed sinc, which is the family OPERA's own geocoding uses for it: it
-    reproduces a sub-pixel shift of a fringe exactly, where nearest does not interpolate at
-    all and so leaves the shift unapplied as a phase error. Real data keeps nearest, which
-    moves values without inventing any.
+    How each layer moves depends on what its numbers mean. A mask is categorical, so
+    nearest. A complex layer is sinc interpolated, in two steps: oversampled by zero padding
+    its spectrum, which is exact, then read at the nearest fine sample. Everything else
+    takes the caller's kernel.
     """
     from rasterio.enums import Resampling
 
     how = Resampling[resampling or const.DEFAULT_RESAMPLING["real"]]
     target = CRS.from_user_input(crs)
-    reference = max(stacks.values(), key=lambda s: s.sizes["time"])
-    if CRS.from_user_input(reference.rio.crs) != target:
+
+    already = [s for s in stacks.values() if CRS.from_user_input(s.rio.crs) == target]
+    if already:
+        reference = max(already, key=lambda s: s.sizes["time"])
+    else:
+        log.warning("no zone is in %s, so every one of them is resampled onto a grid "
+                    "derived from the busiest rather than one OPERA delivered",
+                    target.to_string())
+        reference = max(stacks.values(), key=lambda s: s.sizes["time"])
         reference = reference.rio.reproject(target, resampling=how)
 
     moved = []

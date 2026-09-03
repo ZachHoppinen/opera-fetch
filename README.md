@@ -89,14 +89,26 @@ stacks = of.fetch_stacks(aoi, start, end, reproject_to="EPSG:32613")   # one Dat
 by name. It moves the smaller zone onto the larger one's grid, so the larger part of the
 result is still on a grid OPERA delivered.
 
-We make the following reprojection choices. A mask is categorical, so it always moves by nearest. Real layers take `nearest` by default, which moves values without
-inventing any, and `resampling=` overrides that with any name from `rasterio.enums.Resampling`.
+**A zone already in the CRS you asked for is not touched.** It becomes the reference and
+keeps its own grid, so only the other zones move and the result stays on a lattice OPERA
+delivered. Ask for a CRS no zone is in and all of them move, onto a grid derived from the
+busiest, which is nobody's lattice. That case warns.
 
-**A complex layer takes neither, and is reprojected by oversampling and nearest.** A CSLC is
-bandlimited to its own grid, but speckle fills that band right up to Nyquist: half the
-energy of a real burst sits beyond half of Nyquist, exactly where a truncated sinc rolls
-off. So it is oversampled eight times over by zero padding its spectrum, which is the exact
-interpolator for such a signal, and then read at the nearest fine sample.
+We make the following reprojection choices. A mask is categorical, so it always moves by
+nearest. Real layers take `nearest` by default, which moves values without inventing any,
+and `resampling=` overrides that with any name from `rasterio.enums.Resampling`.
+
+**A complex layer is sinc interpolated**, the same family OPERA geocodes complex data with.
+It happens in two steps rather than through a kernel, which is why the code says nearest
+and does not mean it: the layer is oversampled eight times over by zero padding its
+spectrum, which is exact sinc interpolation for a bandlimited signal, and the fine sample
+is then read directly. Reading is the right second step precisely because it filters
+nothing, and it lands within a sixteenth of a pixel of what was asked for.
+
+Doing it in one step with a kernel is the obvious alternative, and it is measurably worse.
+A CSLC is bandlimited to its own grid, but speckle fills that band right up to Nyquist:
+half the energy of a real burst sits beyond half of Nyquist, exactly where a truncated sinc
+rolls off.
 
 **It reprojects the area you asked for, one acquisition at a time, not whole bursts**, so
 the memory is knowable before anything runs. A whole CSLC burst is 4842 by 18648, which is
@@ -127,8 +139,8 @@ Four things raise rather than returning something quietly wrong:
   when Sentinel-1 launched. A range inside the December 2021 to 2025 single-satellite gap
   is allowed but noted: Sentinel-1B had failed and 1C was not yet operational, so there are
   about half the usual acquisitions.
-- **An `aoi` and `bounds` together**, since both say what area to deliver.
-- **`rms` or `mode` on complex data**, as above.
+- **A resampling name GDAL will not apply to complex data**, the quantiles among them,
+  which have no meaning for a complex number. GDAL raises those itself.
 
 ## Products
 
@@ -143,12 +155,12 @@ An RTC stack therefore comes back with `vv`, `vh`, `mask`, `local_incidence_angl
 `number_of_looks`; a CSLC one with `vv` (or `hh`), `mask`, `local_incidence_angle`,
 `los_east` and `los_north`.
 
-What varies between acquisitions rides on the time axis as a coordinate: `track`,
+What varies between acquisitions is a coordinate on the time axis: `track`,
 `direction`, `platform` (S1A, S1B, S1C) and `absolute_orbit`, which is what a baseline is
 worked out from.
 
 What is fixed for the whole stack is an attribute: `epsg`, `tracks`, `spacing`, `burst_id`,
-`bursts`, and `footprint`, the outline of the data rather than its bounding box.
+`bursts`, and `footprint`.
 
 A once-per-burst layer stays `(y, x)` while one track covers the area, and gains a time
 axis when a second track does, because the two see the ground from different angles.
@@ -157,16 +169,13 @@ The AOI is delivered whole: the grid covers it, widened outward to the lattice, 
 edge lands under one cell outside what you asked for and never inside it.
 
 Every stack also records where it came from: `granules` lists the exact granule IDs it was
-built from, with `product_version`, `created` and `opera_fetch_version` beside them. A
-reprocessing changes the numbers, so without those a saved file cannot be told apart from
-one built next year. The version is stored as text, because as a float v1.10 and v1.1 are
-the same number.
+built from, with `product_version`, `created` and `opera_fetch_version` beside them.
 
 Static layers are made once per burst rather than once per acquisition, so they are
 searched by burst ID and downloaded once however many seasons the stack covers. They come
 along automatically; pass `static=False` to skip them.
 
-Complex data has nowhere standard to live: netCDF-4 has no complex type, so a CSLC stack
+Complex data is challenged by netCDF-4 having no complex type, so a CSLC stack
 written to `.nc` goes through h5netcdf with `invalid_netcdf`. It is valid HDF5 and xarray
 reads it straight back, but a strict netCDF reader will not open it. **Use `.zarr` for
 CSLC.**

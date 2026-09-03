@@ -103,16 +103,15 @@ def test_a_misaligned_burst_is_not_swallowed_as_an_empty_one():
         rtc_module.read_burst = original
 
 
-def test_an_aoi_and_bounds_together_are_refused():
-    """Both say what area to deliver, and bounds used to lose without a word."""
-    import pytest
+def test_a_utm_box_can_be_given_as_the_aoi_in_that_zone():
+    """There is no separate bounds argument: an exact box is an aoi with aoi_crs set."""
+    from opera_fetch.aoi import as_geometry
+    from opera_fetch.grid import reproject
 
-    from opera_fetch.stack import assemble
-
-    with pytest.raises(ValueError, match="not both"):
-        assemble(["OPERA_L2_RTC-S1_T049-103327-IW3_20241004T011054Z_"
-                  "20241004T043235Z_S1A_30_v1.0_VV.tif"],
-                 aoi=(-107.0, 38.8, -106.9, 38.9), bounds=(0, 0, 1, 1))
+    box = (326_500, 4_302_000, 339_000, 4_312_000)
+    back = reproject(as_geometry(box, "EPSG:32613"), 32613).bounds
+    # Within a cell of what was asked for, which the lattice widens out to anyway.
+    assert all(abs(a - b) < 30 for a, b in zip(box, back, strict=True))
 
 
 def _zone_bursts():
@@ -352,3 +351,34 @@ def test_a_granule_with_no_identity_is_refused():
     with pytest.raises(ValueError, match="names no burst_id"):
         metadata.describe(make_burst(west=500_010, north=4_332_210), "RTC",
                           {"track": 49, "direction": "ASCENDING"}, [])
+
+
+def test_a_zone_already_in_the_target_crs_is_not_resampled():
+    """Choosing the busiest zone as the reference resampled data that was already right,
+    and put the result on a grid nobody delivered."""
+    from opera_fetch.stack import _onto_one_crs
+
+    quiet = make_burst(west=500_010, north=4_332_210, epsg=32612, times=2)
+    busy = make_burst(west=500_010, north=4_332_210, epsg=32613, times=4)
+    for stack, track in ((quiet, 49), (busy, 56)):
+        stack.coords["track"] = ("time", [track] * stack.sizes["time"])
+
+    # Ask for the quieter zone's own CRS: its grid must survive untouched.
+    joined = _onto_one_crs({32612: quiet, 32613: busy}, "EPSG:32612")
+    assert np.array_equal(joined.x.values, quiet.x.values)
+    assert np.array_equal(joined.y.values, quiet.y.values)
+
+
+def test_a_crs_no_zone_is_in_says_everything_moves(caplog):
+    import logging
+
+    from opera_fetch.stack import _onto_one_crs
+
+    a = make_burst(west=500_010, north=4_332_210, epsg=32612)
+    b = make_burst(west=500_010, north=4_332_210, epsg=32613)
+    for stack, track in ((a, 49), (b, 56)):
+        stack.coords["track"] = ("time", [track] * stack.sizes["time"])
+
+    with caplog.at_level(logging.WARNING, logger="opera_fetch.stack"):
+        _onto_one_crs({32612: a, 32613: b}, "EPSG:32611")
+    assert "no zone is in" in caplog.text
