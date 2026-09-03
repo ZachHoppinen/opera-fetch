@@ -7,7 +7,6 @@ looked at, filtered and costed before anything is downloaded.
 import logging
 import time
 
-import numpy as np
 import pandas as pd
 
 from opera_fetch import constants as const
@@ -93,27 +92,9 @@ def search(aoi=None, start=None, end=None, product=const.RTC, burst_id=None, tra
             time.sleep(delay)
 
     frame = _frame(results)
-    log.info("%s: %d granules, %d bursts, tracks %s, %s", product, len(frame),
-             frame.burst_id.nunique(), sorted(frame.track.dropna().unique().tolist()),
-             _cadence(frame))
+    log.info("%s: %d granules, %d bursts, tracks %s", product, len(frame),
+             frame.burst_id.nunique(), sorted(frame.track.dropna().unique().tolist()))
     return frame
-
-
-def _cadence(frame):
-    """How often a burst is acquired in this result, as a phrase for the log.
-
-    Measured rather than assumed. How dense a series is depends on the place: losing
-    Sentinel-1B halved the European archive and did nothing at all to a Colorado track it
-    never covered, so there is no rule here worth writing down, only a count.
-    """
-    if frame.empty or "time" not in frame:
-        return "no acquisitions"
-    gaps = []
-    for _, times in frame.groupby("burst_id")["time"]:
-        gaps += times.sort_values().diff().dropna().dt.total_seconds().tolist()
-    if not gaps:
-        return "one acquisition per burst"
-    return f"{np.median(gaps) / 86400:.0f} days apart typically"
 
 
 COLUMNS = ["fileID", "product", "burst_id", "track", "direction", "polarization",
