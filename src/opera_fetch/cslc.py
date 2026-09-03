@@ -13,7 +13,7 @@ import pandas as pd
 import xarray as xr
 
 from opera_fetch import constants as const
-from opera_fetch import filenames
+from opera_fetch import filenames, metadata
 from opera_fetch.errors import NoAcquisitions
 from opera_fetch.grid import place
 
@@ -60,24 +60,24 @@ def read_burst(paths, chunks=CHUNK, extra=()):
         platform=("time", [identities[t]["mission_id"] for t in times]),
         absolute_orbit=("time", [int(identities[t]["absolute_orbit_number"]) for t in times]))
 
-    identity = identities[times[0]]
-    stack.attrs = {
-        "product": const.CSLC,
-        "burst_id": bursts.pop(),
-        "track": int(identity["track_number"]),
-        "direction": identity["orbit_pass_direction"].upper(),
-        "spacing": const.SPACING[const.CSLC],
-        # The outline of the data itself, which the bounding box overstates by a third.
-        "footprint": identity.get("bounding_polygon", ""),
-        # Which granules these values came from, for the same reason as RTC.
-        "granules": "\n".join(sorted(Path(p).stem for p in acquisitions)),
-        "product_version": str(identity.get("product_version", "")),
-    }
+    metadata.describe(stack, const.CSLC, identify(identities[times[0]]),
+                      [Path(p).stem for p in acquisitions])
     stack = _add_static(stack, paths, chunks)
 
     log.info("burst %s: %d acquisitions on a %s grid",
              stack.attrs["burst_id"], stack.sizes["time"], stack.rio.crs)
     return stack.chunk({"time": -1})
+
+
+def identify(identification):
+    """The burst's identity out of a CSLC identification group, in the shape metadata wants."""
+    return {
+        "burst_id": identification.get("burst_id", ""),
+        "track": identification.get("track_number"),
+        "direction": identification.get("orbit_pass_direction"),
+        "footprint": identification.get("bounding_polygon"),
+        "product_version": identification.get("product_version"),
+    }
 
 
 def _open(path, group, chunks):

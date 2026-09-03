@@ -73,11 +73,6 @@ MASK_MEANINGS = "0 clear, 1 shadow, 2 layover, 3 both"
 # ASF, not read from a document.
 ARCHIVE_START = "2016-01-01"
 
-# Sentinel-1B failed in December 2021 and 1C only reached operations in 2025, so a range
-# inside that gap has roughly half the acquisitions a range either side of it does.
-#TODO do we need this for some reason?
-ONE_SATELLITE = ("2021-12-23", "2025-03-01")
-
 # T049-103327-IW3 in a filename, t049_103327_iw3 inside an HDF5.
 BURST_ID = re.compile(r"T(\d{3})[-_](\d{6})[-_](IW[1-3])", re.IGNORECASE)
 

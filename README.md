@@ -1,6 +1,7 @@
 # opera-fetch
 
-OPERA Sentinel-1 RTC and CSLC for an area and a date range, on OPERA's own grid.
+Helper to build OPERA Sentinel-1 RTC and CSLC data stacks for a user defined area and a date range.
+
 
 [OPERA](https://www.jpl.nasa.gov/go/opera/), Observational Products for End-Users from
 Remote Sensing Analysis, is a NASA project at JPL that turns satellite data into products
@@ -12,7 +13,7 @@ and delivered one burst at a time, free, through the
 [github.com/opera-adt](https://github.com/opera-adt) and the granules are searchable in
 [ASF Vertex](https://search.asf.alaska.edu).
 
-This project uses these six steps to get OPERA data:
+This project uses these six steps to get OPERA data for scientific/operational analysis:
 
 1. name an area and a date range
 2. find what ASF has
@@ -65,9 +66,9 @@ The lattice is taken from the OPERA products themselves.
 
 OPERA assigns the UTM zone **per burst**. Over the East River, T049 and T129 arrive as
 EPSG:32612 while T056 and T151 arrive as EPSG:32613. That is the same ground with
-`x = 846675` in one and `x = 326445` in the other, so no single grid holds both.
+`x = 846675` in one and `x = 326445` in the other, so no single spatial grid holds both.
 
-Hence the return type:
+So return a dictionary per EPSG in your AOI:
 
 ```
 {32612: <xarray.Dataset>, 32613: <xarray.Dataset>}
@@ -88,32 +89,14 @@ stacks = of.fetch_stacks(aoi, start, end, reproject_to="EPSG:32613")   # one Dat
 by name. It moves the smaller zone onto the larger one's grid, so the larger part of the
 result is still on a grid OPERA delivered.
 
-A mask is categorical, so it always moves by nearest: an interpolated class code is a code
-nobody observed. Real layers take `nearest` by default, which moves values without
-inventing any, and `resampling=` overrides that with any name from
-`rasterio.enums.Resampling`.
+We make the following reprojection choices. A mask is categorical, so it always moves by nearest. Real layers take `nearest` by default, which moves values without
+inventing any, and `resampling=` overrides that with any name from `rasterio.enums.Resampling`.
 
-**A complex layer takes neither, because a kernel is the wrong tool for it.** A CSLC is
+**A complex layer takes neither, and is reprojected by oversampling and nearest.** A CSLC is
 bandlimited to its own grid, but speckle fills that band right up to Nyquist: half the
 energy of a real burst sits beyond half of Nyquist, exactly where a truncated sinc rolls
 off. So it is oversampled eight times over by zero padding its spectrum, which is the exact
-interpolator for such a signal, and then read at the nearest fine sample. Nearest is right
-as the second step precisely because it filters nothing.
-
-Coherence against the analytic answer, worst case over a range of sub-pixel shifts of real
-CSLC:
-
-| | worst coherence | memory, one 512 by 512 scene |
-|---|---|---|
-| `nearest`, no oversampling | 0.638 | 2 MB |
-| `lanczos`, no oversampling | 0.951 | 2 MB |
-| oversample 2x, then `lanczos` | 0.978 | 8 MB |
-| **oversample 8x, then nearest**, what it does | **0.996** | 134 MB |
-| oversample 16x, then nearest | 0.999 | 537 MB |
-
-Interpolating on the fine grid is worse than reading it, which is not obvious until
-measured: the 2x row is held back by GDAL filtering a second time as it decimates, and that
-costs more than it saves. Eight is where the curve flattens.
+interpolator for such a signal, and then read at the nearest fine sample.
 
 **It reprojects the area you asked for, one acquisition at a time, not whole bursts**, so
 the memory is knowable before anything runs. A whole CSLC burst is 4842 by 18648, which is

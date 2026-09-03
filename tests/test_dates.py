@@ -39,9 +39,19 @@ def test_a_range_that_only_starts_early_is_allowed():
     assert start is not None and end is not None
 
 
-def test_the_single_satellite_gap_is_pointed_out(caplog):
-    import logging
+def test_how_dense_a_series_is_gets_measured_not_assumed():
+    """Losing Sentinel-1B halved the European archive and did nothing to a Colorado track
+    it never covered, so the search counts rather than warning."""
+    import pandas as pd
 
-    with caplog.at_level(logging.INFO, logger="opera_fetch.search"):
-        as_dates("2023-01-01", "2023-06-30")
-    assert "single-satellite gap" in caplog.text
+    from opera_fetch.search import _cadence
+
+    twelve_daily = pd.DataFrame({
+        "burst_id": ["T049-103327-IW3"] * 4,
+        "time": pd.to_datetime(["2024-11-09", "2024-11-21", "2024-12-03", "2024-12-15"]),
+    })
+    assert _cadence(twelve_daily) == "12 days apart typically"
+
+    one_each = pd.DataFrame({"burst_id": ["a", "b"], "time": pd.to_datetime(["2024-11-09"] * 2)})
+    assert _cadence(one_each) == "one acquisition per burst"
+    assert _cadence(pd.DataFrame()) == "no acquisitions"

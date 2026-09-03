@@ -172,7 +172,6 @@ def _union(bursts):
     east, north = corners[:, 2].max(), corners[:, 3].max()
     return west, south, east, north
 
-#TODO do we need this for some reason?
 def _round(bounds):
     return tuple(round(value) for value in bounds)
 

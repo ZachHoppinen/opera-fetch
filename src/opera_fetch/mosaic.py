@@ -158,12 +158,15 @@ def _shared_attrs(bursts):
     attrs["granules"] = "\n".join(g for g in granules if g)
     return attrs
 
-#TODO do we need to keep this for some reason?
 def _one_pass(bursts):
     """Refuse to mosaic across a boundary a mosaic has no business crossing.
 
     Ascending and descending land on the same day, and averaging a 6 am pass with a 6 pm
     one destroys the diurnal difference that keeping them apart exists to measure.
+
+    Unreachable through ``stack.assemble``, which groups bursts into passes before it gets
+    here. It is for everyone else: ``mosaic`` is public, and two bursts of different tracks
+    average into something plausible looking rather than failing.
     """
     for field in ("track", "direction", "product"):
         seen = {burst.attrs.get(field) for burst in bursts}

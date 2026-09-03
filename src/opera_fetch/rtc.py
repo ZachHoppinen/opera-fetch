@@ -15,7 +15,7 @@ import rioxarray
 import xarray as xr
 
 from opera_fetch import constants as const
-from opera_fetch import filenames
+from opera_fetch import filenames, metadata
 from opera_fetch.errors import NoAcquisitions
 from opera_fetch.grid import place
 
@@ -113,24 +113,20 @@ def _granules(paths):
         raise ValueError(f"paths span {len(bursts)} bursts: {sorted(bursts)}. Group them first")
     return dict(granules)
 
-#TODO call identifify to match CSLC format?
+def identify(tags):
+    """The burst's identity out of an RTC granule's tags, in the shape metadata wants."""
+    return {
+        "burst_id": tags.get("BURST_ID", ""),
+        "track": tags.get("TRACK_NUMBER"),
+        "direction": tags.get("ORBIT_PASS_DIRECTION"),
+        "footprint": tags.get("BOUNDING_POLYGON"),
+        "product_version": tags.get("PRODUCT_VERSION"),
+    }
+
+
 def _describe(stack, tags, granules):
     """Carry the burst's identity, and the units of its values, onto the stack."""
-    stack.attrs = {
-        "product": const.RTC,
-        "burst_id": tags.get("BURST_ID", "").upper().replace("_", "-"),
-        "track": int(tags["TRACK_NUMBER"]),
-        "direction": tags["ORBIT_PASS_DIRECTION"].upper(),
-        "spacing": const.SPACING[const.RTC],
-        # The outline of the data itself. A burst is a rotated parallelogram and its
-        # bounding box is a third larger, so a box overlapping an area proves nothing.
-        "footprint": tags.get("BOUNDING_POLYGON", ""),
-        # Which granules these values came from. A reprocessing changes the numbers, so
-        # without the IDs a saved stack cannot be told apart from one built next year.
-        "granules": "\n".join(sorted(granules)),
-        # Text, not a number: as a float, v1.10 and v1.1 are the same version.
-        "product_version": str(tags.get("PRODUCT_VERSION", "")),
-    }
+    metadata.describe(stack, const.RTC, identify(tags), granules)
     for polarization in POLARIZATIONS:
         if polarization in stack:
             stack[polarization].attrs = {

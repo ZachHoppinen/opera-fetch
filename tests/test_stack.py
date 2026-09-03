@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 from tests.conftest import make_burst
 
 from opera_fetch.stack import Pass, _one_zone, align_passes, group_paths
@@ -320,3 +321,34 @@ def test_oversampling_handles_an_odd_number_of_samples():
     fine = resample.oversample(coarse, 4)
     assert fine.shape == (124, 132)
     assert np.allclose(fine.values[::4, ::4], values, atol=1e-4)
+
+
+def test_both_products_describe_themselves_the_same_way():
+    """RTC keeps its identity in GeoTIFF tags and CSLC in an HDF5 group. They used to build
+    the attributes separately, which is how two products drift apart."""
+    from opera_fetch import cslc, metadata, rtc
+
+    tags = {"BURST_ID": "t049_103327_iw3", "TRACK_NUMBER": "49",
+            "ORBIT_PASS_DIRECTION": "ascending", "BOUNDING_POLYGON": "POLYGON ((0 0))",
+            "PRODUCT_VERSION": "1.0"}
+    group = {"burst_id": b"t049_103327_iw3".decode(), "track_number": 49,
+             "orbit_pass_direction": "Ascending", "bounding_polygon": "POLYGON ((0 0))",
+             "product_version": "1.0"}
+    assert set(rtc.identify(tags)) == set(cslc.identify(group)) == set(metadata.FIELDS)
+
+    one = metadata.describe(make_burst(west=500_010, north=4_332_210), "RTC",
+                            rtc.identify(tags), ["a"]).attrs
+    two = metadata.describe(make_burst(west=500_010, north=4_332_210), "RTC",
+                            cslc.identify(group), ["a"]).attrs
+    assert one == two, "the same burst described two ways must come out the same"
+    assert one["burst_id"] == "T049-103327-IW3"
+    assert one["direction"] == "ASCENDING"
+    assert isinstance(one["track"], int)
+
+
+def test_a_granule_with_no_identity_is_refused():
+    from opera_fetch import metadata
+
+    with pytest.raises(ValueError, match="names no burst_id"):
+        metadata.describe(make_burst(west=500_010, north=4_332_210), "RTC",
+                          {"track": 49, "direction": "ASCENDING"}, [])
