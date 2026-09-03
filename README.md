@@ -15,19 +15,31 @@ The six steps that every project repeats:
 import opera_fetch as of
 
 stacks = of.fetch_stacks((-107.0, 38.85, -106.85, 38.95), "2024-11-01", "2024-11-30",
-                  product=of.RTC, cache_dir="data/raw/east_river",
-                  out="data/processed/east_river.nc")
+                         product=of.RTC, cache_dir="data/raw/east_river",
+                         out="data/processed/east_river.nc")
+
+for epsg, stack in stacks.items():
+    print(f"=== EPSG:{epsg}")
+    print(of.summary(stack))
 ```
 
 ```
-T049 ascending EPSG:32612
+=== EPSG:32612
 grid       390 by 451 at (30.0, 30.0) m, EPSG:32612
-variables  vh, vv, local_incidence_angle, number_of_looks, mask
+variables  vh, vv, mask, local_incidence_angle, number_of_looks
 bursts     1
 times      2 from 2024-11-09 to 2024-11-21
 coverage   100% of cells finite, median over time
-aoi        100% of the AOI is inside the grid
+
+=== EPSG:32613
+grid       381 by 442 at (30.0, 30.0) m, EPSG:32613
+variables  vh, vv, mask, local_incidence_angle, number_of_looks
+bursts     4
+times      4 from 2024-11-09 to 2024-11-28
+coverage   100% of cells finite, median over time
 ```
+
+Two entries because this AOI straddles a UTM zone boundary. Usually there is one.
 
 ## Processing choices
 
@@ -41,7 +53,7 @@ The lattice is taken from the OPERA products themselves.
 
 That is why a result is **one Dataset per UTM zone**, keyed by EPSG:
 
-```python
+```
 {32612: <xarray.Dataset>, 32613: <xarray.Dataset>}
 ```
 
@@ -72,10 +84,10 @@ stacks = of.fetch_stacks(aoi, start, end, reproject_to="EPSG:32613")
 That is the only resampling in the package, which is why it has to be requested. It moves
 the smaller zone onto the larger one's grid, nearest neighbour, so no value is invented.
 
-**Neighbouring bursts are found by a tolerance.** That is enough to make every burst's
-time axis unique and a mosaic of them an empty diagonal ribbon. `align_passes` collapses
-timestamps closer together than a tolerance (10 minutes by default) into one pass. `assemble`
-does this for you.
+**Neighbouring bursts are acquired seconds apart.** That is enough to make every burst's
+time axis unique, and a mosaic of them an empty diagonal ribbon. `align_passes` collapses
+timestamps closer together than a tolerance, 10 minutes by default, into one pass.
+`assemble` does it for you.
 
 **Overlapping bursts are averaged by their looks**, which is how OPERA mosaics its own,
 rather than flat. In practice this changes almost nothing: `number_of_looks` is a function
@@ -93,10 +105,11 @@ particular pixel was measured. For per-burst timing, read the bursts and skip th
 
 ```python
 bursts = of.read_bursts(paths)      # each keeps its own acquisition times
+```
 
 **Nothing is masked.** Values come out as OPERA delivers them: linear gamma0 for RTC, not
 dB; complex for CSLC, with the phase intact. The layover/shadow mask rides along as its own
-variable rather than being applied, so whether a layover pixel counts stays is a future decision:
+variable rather than being applied, so whether a layover pixel counts stays your decision:
 
 ```python
 clear = stack.where(stack.mask == 0)
@@ -105,8 +118,8 @@ clear = stack.where(stack.mask == 0)
 That line works for either product, but the two masks are not the same thing. OPERA ships
 an RTC mask **per acquisition**, so `mask` there has dims `(time, y, x)`. It ships no CSLC
 mask at all; the only one is in CSLC-STATIC, made **once per burst**, so `mask` there is
-`(y, x)` and broadcasts over time. Codes for both RTC and CSLC — 0 clear, 1 shadow, 2 layover, 3 both —
-but no-observation is 255 for RTC (uint8) and 127 for CSLC (int8).
+`(y, x)` and broadcasts over time. The codes agree: 0 clear, 1 shadow, 2 layover, 3 both.
+No observation does not: 255 for RTC (uint8) and 127 for CSLC (int8).
 
 ## Products
 
@@ -117,14 +130,19 @@ but no-observation is 255 for RTC (uint8) and 127 for CSLC (int8).
 | `CSLC` | 5 by 10 m | `vv` or `hh`, `complex64` |
 | `CSLC_STATIC` | 5 by 10 m | `local_incidence_angle`, `mask`, `los_east`, `los_north` |
 
-A CSLC stack therefore comes back with `vv` (or `hh`) alongside `local_incidence_angle`,
-`mask`, `los_east` and `los_north`; an RTC one with `vv`, `vh`, `local_incidence_angle`,
-`number_of_looks` and `mask`.
+An RTC stack therefore comes back with `vv`, `vh`, `mask`, `local_incidence_angle` and
+`number_of_looks`; a CSLC one with `vv` (or `hh`), `mask`, `local_incidence_angle`,
+`los_east` and `los_north`.
 
-What varies between acquisitions rides on the time axis as a coordinate: `platform`
-(S1A, S1B, S1C) and `absolute_orbit`, which is what a baseline is worked out from. What is
-fixed for the whole stack is an attribute: `track`, `direction`, `epsg`, `spacing`,
-`burst_id`, `bursts`, and `footprint`, the outline of the data rather than its bounding box.
+What varies between acquisitions rides on the time axis as a coordinate: `track`,
+`direction`, `platform` (S1A, S1B, S1C) and `absolute_orbit`, which is what a baseline is
+worked out from.
+
+What is fixed for the whole stack is an attribute: `epsg`, `tracks`, `spacing`, `burst_id`,
+`bursts`, and `footprint`, the outline of the data rather than its bounding box.
+
+A once-per-burst layer stays `(y, x)` while one track covers the area, and gains a time
+axis when a second track does, because the two see the ground from different angles.
 
 The AOI is delivered whole: the grid covers it, widened outward to the lattice, so each
 edge lands under one cell outside what you asked for and never inside it.
