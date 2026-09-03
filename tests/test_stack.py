@@ -295,8 +295,8 @@ def test_oversampling_handles_an_odd_number_of_samples():
 
 
 def test_both_products_describe_themselves_the_same_way():
-    """RTC keeps its identity in GeoTIFF tags and CSLC in an HDF5 group. They used to build
-    the attributes separately, which is how two products drift apart."""
+    """RTC keeps its identity in GeoTIFF tags and CSLC in an HDF5 group, so the two readers
+    have to agree on the fields they hand over."""
     from opera_fetch import cslc, metadata, rtc
 
     tags = {"BURST_ID": "t049_103327_iw3", "TRACK_NUMBER": "49",
@@ -326,8 +326,8 @@ def test_a_granule_with_no_identity_is_refused():
 
 
 def test_a_zone_already_in_the_target_crs_is_not_resampled():
-    """Choosing the busiest zone as the reference resampled data that was already right,
-    and put the result on a grid nobody delivered."""
+    """A zone already in the target CRS keeps its own grid and is not touched, so the
+    result stays on a lattice OPERA delivered rather than one derived from another zone."""
     from opera_fetch.stack import _onto_one_crs
 
     quiet = make_burst(west=500_010, north=4_332_210, epsg=32612, times=2)
@@ -364,7 +364,7 @@ def _aoi_in_zone_13():
 
 
 def test_auto_picks_the_zone_the_aoi_lies_in():
-    """Nobody knows their UTM zone offhand, so 'auto' picks the one the AOI is actually in.
+    """'auto' picks the zone the AOI is actually in, so no EPSG has to be named.
 
     That is the zone fitting it with the least distortion, and it does not depend on how
     many acquisitions each zone happened to collect, so the same AOI lands on the same grid

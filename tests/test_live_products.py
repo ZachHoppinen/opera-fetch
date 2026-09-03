@@ -1,7 +1,7 @@
 """Live checks against the ASF archive.
 
 These do not test the science. They test the assumptions the package rests on: that search
-still answers, that OPERA filenames still carry the fields we parse, that an RTC burst
+still answers, that OPERA filenames still carry the fields the parser expects, that an RTC burst
 still has a static layer to join to by burst ID, and that a real download still assembles
 onto OPERA's own lattice.
 
@@ -45,9 +45,10 @@ SITES = {
 def week_seed():
     """This week's seed, or whatever OPERA_FETCH_SEED names.
 
-    "or None", not just get(): a workflow_dispatch with no seed, and every scheduled run,
-    set the variable to the empty string. Taken as a seed, that pins every run to the same
-    area forever, which is the thing seeding on the week exists to avoid.
+    A workflow_dispatch with no seed, and every scheduled run, set the variable to the
+    empty string rather than leaving it unset. An empty string taken as a seed pins every
+    run to one area forever, which is what seeding on the week exists to avoid, so the
+    lookup falls back on falsiness and not on the key being absent.
     """
     seed = os.environ.get("OPERA_FETCH_SEED") or None
     if seed is None:
@@ -94,7 +95,7 @@ def test_search_still_answers_with_the_fields_we_parse(case):
 
 
 def test_every_granule_name_still_parses(case):
-    """Our regex over the four products, against whatever ASF is serving today."""
+    """The filename regex over the four products, against whatever ASF is serving today."""
     aoi, start, end = case
     for product in (of.RTC, of.CSLC):
         found = of.search(aoi, start, end, product=product)

@@ -162,7 +162,7 @@ def test_an_unknown_look_count_does_not_drop_the_burst_from_that_cell():
 
 
 def test_a_single_burst_mosaic_leaves_the_caller_alone():
-    """Every other path returns something new; this one used to hand back the input."""
+    """A mosaic of one burst is still a new object, not the burst that went in."""
     one = make_burst(west=500_010, north=4_332_210)
     before = dict(one.attrs)
 

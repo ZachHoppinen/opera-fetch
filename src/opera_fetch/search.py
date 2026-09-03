@@ -138,7 +138,7 @@ def data_urls(frame, layers=None):
 
 
 def _is_data(name, product, layers):
-    """Whether a filename is a data layer we asked for, not browse or a checksum."""
+    """Whether a filename is one of the requested data layers, not browse or a checksum."""
     if name.endswith((".md5", ".png", ".xml")):
         return False
     if product in (const.CSLC, const.CSLC_STATIC):

@@ -25,7 +25,7 @@ def fetch_stacks(aoi, start=None, end=None, product=const.RTC, cache_dir="data/r
                  direction=None, out=None, mask=False, how=None, tolerance=TOLERANCE,
                  chunks=None, extra=(), max_workers=10, reproject_to=None,
                  resampling=None):
-    """Search, download, mosaic, stack, clip and check. One Dataset per pass.
+    """Search, download, mosaic, stack, clip and check. One Dataset per UTM zone.
 
     Parameters
     ----------

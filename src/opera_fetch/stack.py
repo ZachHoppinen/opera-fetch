@@ -83,7 +83,7 @@ def read_bursts(paths, chunks=None, extra=()):
 
 def assemble(paths, aoi=None, aoi_crs=None, how=None, tolerance=TOLERANCE,
              chunks=None, extra=(), mask=False, reproject_to=None, resampling=None):
-    """Read, mosaic and stack every burst among the given files, one Dataset per pass.
+    """Read, mosaic and stack every burst among the given files, one Dataset per UTM zone.
 
     Parameters
     ----------
