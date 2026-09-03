@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import NamedTuple
 
 import numpy as np
-import pandas as pd
 import xarray as xr
 from pyproj import CRS
 
@@ -25,11 +24,9 @@ from opera_fetch import cslc, filenames, rtc
 from opera_fetch.aoi import as_geometry
 from opera_fetch.errors import NoAcquisitions
 from opera_fetch.grid import clip, reproject
-from opera_fetch.mosaic import mosaic
+from opera_fetch.mosaic import TOLERANCE, align_passes, mosaic
 
 log = logging.getLogger(__name__)
-
-TOLERANCE = "10min"
 
 
 class Pass(NamedTuple):
@@ -45,11 +42,6 @@ class Pass(NamedTuple):
 
     def __str__(self):
         return f"T{self.track:03d} {self.direction.lower()} EPSG:{self.epsg}"
-
-    @property
-    def name(self):
-        """The pass as a group name a file format will accept."""
-        return f"T{self.track:03d}_{self.direction.upper()}_EPSG{self.epsg}"
 
 
 def group_paths(paths):
@@ -87,40 +79,6 @@ def read_bursts(paths, chunks=None, extra=()):
     if not bursts:
         raise NoAcquisitions("no readable OPERA bursts among the given paths")
     return bursts
-
-
-def align_passes(bursts, tolerance=TOLERANCE):
-    """Give the bursts of one overpass the same timestamp, so they can be mosaicked.
-
-    Neighbouring bursts are acquired a couple of seconds apart, which is enough to make
-    every burst's time axis unique and a mosaic of them an empty diagonal ribbon. Times
-    closer than the tolerance become one pass, stamped with the earliest of them.
-    """
-    every_time = set()
-    for burst in bursts:
-        every_time.update(burst.indexes["time"])
-    stamps = sorted(every_time)
-    gap = pd.Timedelta(tolerance)
-
-    # Walk the timestamps in order. Each one either follows close enough on the last to be
-    # the same overpass, or opens a new one. Either way it is stamped with when that
-    # overpass began.
-    passes = {}
-    pass_started = previous = stamps[0]
-    for stamp in stamps:
-        if stamp - previous > gap:
-            pass_started = stamp
-        passes[stamp] = pass_started
-        previous = stamp
-
-    log.debug("%d acquisitions across %d bursts fall into %d passes",
-              len(stamps), len(bursts), len(set(passes.values())))
-
-    aligned = []
-    for burst in bursts:
-        stamped = [passes[stamp] for stamp in burst.indexes["time"]]
-        aligned.append(burst.assign_coords(time=stamped))
-    return aligned
 
 
 def assemble(paths, aoi=None, aoi_crs=None, how=None, tolerance=TOLERANCE,
@@ -239,7 +197,10 @@ def _one_zone(passes, epsg):
 
     for name in static:
         layers = [one[name] for one in passes]
-        if _all_equal(layers):
+        # Compared per pass rather than per acquisition: a handful of passes, one band each.
+        same = all(np.array_equal(layers[0].values, other.values, equal_nan=True)
+                   for other in layers[1:])
+        if same:
             # One track, or tracks whose geometry agrees: one layer for the whole zone
             # rather than a copy per acquisition.
             stack[name] = layers[0]
@@ -265,16 +226,6 @@ def _one_zone(passes, epsg):
     log.info("EPSG:%d: %d acquisitions over tracks %s on one %d by %d grid", epsg,
              stack.sizes["time"], stack.attrs["tracks"], stack.sizes["y"], stack.sizes["x"])
     return stack
-
-
-def _all_equal(layers):
-    """Whether every one of these layers holds the same values.
-
-    Compared per pass, not per acquisition: there are a handful of passes and the layers
-    are one band each, so this is cheap next to what it saves.
-    """
-    first = layers[0].values
-    return all(np.array_equal(first, other.values, equal_nan=True) for other in layers[1:])
 
 
 def _best_zone(stacks, aoi=None):
@@ -353,18 +304,19 @@ def _onto_one_crs(stacks, crs, resampling=None):
         masks = [name for name in stack.data_vars if name.endswith("mask")]
         complex_layers = [name for name in stack.data_vars
                           if np.issubdtype(stack[name].dtype, np.complexfloating)]
-        ready = _declare_mask_nodata(stack)
-
-        plain = ready.drop_vars(masks + complex_layers)
+        plain = stack.drop_vars(masks + complex_layers)
         matched = (plain.rio.reproject_match(reference, resampling=how) if plain.data_vars
-                   else ready[[]].rio.reproject_match(reference, resampling=how))
+                   else stack[[]].rio.reproject_match(reference, resampling=how))
         log.info("moved %d layer(s) with %s, %d mask(s) with nearest, %d complex "
                  "oversampled first", len(plain.data_vars), how.name, len(masks),
                  len(complex_layers))
 
+        # Told which code means no observation GDAL leaves it alone; left to work it out
+        # it rewrote 255 as 254, which OPERA does not define.
+        nodata = const.MASK_NODATA[stack.attrs.get("product", const.RTC)]
         for name in masks:
-            matched[name] = ready[[name]].rio.reproject_match(
-                reference, resampling=Resampling.nearest)[name]
+            matched[name] = stack[name].rio.write_nodata(nodata).rio.reproject_match(
+                reference, resampling=Resampling.nearest)
         for name in complex_layers:
             matched[name] = _oversampled_reproject(stack[name], reference)
         moved.append(matched)
@@ -424,20 +376,6 @@ def _oversampled_reproject(field, reference):
     if not timed:
         return moved[0]
     return xr.concat(moved, dim="time").assign_coords(time=field.time)
-
-
-def _declare_mask_nodata(stack):
-    """Tell rasterio which mask code means no observation, before it guesses.
-
-    Left unsaid, GDAL sees the fill value in the data, decides it must not be mistaken for
-    nodata, and rewrites it: 255 came out as 254, a code OPERA does not define.
-    """
-    product = stack.attrs.get("product", const.RTC)
-    stack = stack.copy()
-    for name in stack.data_vars:
-        if name.endswith("mask"):
-            stack[name] = stack[name].rio.write_nodata(const.MASK_NODATA[product])
-    return stack
 
 
 def _overlapping(bursts, geometry):

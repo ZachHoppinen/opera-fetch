@@ -1,4 +1,4 @@
-"""Combine the bursts of one pass onto a single grid.
+"""Collapse the bursts of one overpass onto a shared time axis, then onto one grid.
 
 Weighting the overlap by looks is what OPERA's own mosaic does (opera-adt/RTC,
 ``mosaic_geobursts.py``): it accumulates value*nlooks and divides by sum(nlooks).
@@ -22,6 +22,43 @@ from opera_fetch import constants as const
 from opera_fetch.grid import grid_like, place
 
 log = logging.getLogger(__name__)
+
+
+TOLERANCE = "10min"
+
+
+def align_passes(bursts, tolerance=TOLERANCE):
+    """Give the bursts of one overpass the same timestamp, so they can be mosaicked.
+
+    Neighbouring bursts are acquired a couple of seconds apart, which is enough to make
+    every burst's time axis unique and a mosaic of them an empty diagonal ribbon. Times
+    closer than the tolerance become one pass, stamped with the earliest of them.
+    """
+    every_time = set()
+    for burst in bursts:
+        every_time.update(burst.indexes["time"])
+    stamps = sorted(every_time)
+    gap = pd.Timedelta(tolerance)
+
+    # Walk the timestamps in order. Each one either follows close enough on the last to be
+    # the same overpass, or opens a new one. Either way it is stamped with when that
+    # overpass began.
+    passes = {}
+    pass_started = previous = stamps[0]
+    for stamp in stamps:
+        if stamp - previous > gap:
+            pass_started = stamp
+        passes[stamp] = pass_started
+        previous = stamp
+
+    log.debug("%d acquisitions across %d bursts fall into %d passes",
+              len(stamps), len(bursts), len(set(passes.values())))
+
+    aligned = []
+    for burst in bursts:
+        stamped = [passes[stamp] for stamp in burst.indexes["time"]]
+        aligned.append(burst.assign_coords(time=stamped))
+    return aligned
 
 
 def mosaic(bursts, bounds=None, how=None):
@@ -187,5 +224,5 @@ def _one_pass(bursts):
     # overpass that was never collapsed, and mosaicking them gives an empty diagonal ribbon.
     if len(union) > 1 and union.to_series().diff().min() < pd.Timedelta("60s"):
         log.warning("%d timestamps across %d bursts, some seconds apart: these look like one "
-                    "overpass that did not go through stack.align_passes first",
+                    "overpass that did not go through align_passes first",
                     len(union), len(times))

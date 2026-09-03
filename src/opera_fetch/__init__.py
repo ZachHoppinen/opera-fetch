@@ -21,9 +21,9 @@ from opera_fetch.aoi import as_geometry
 from opera_fetch.constants import CSLC, CSLC_STATIC, RTC, RTC_STATIC, __version__
 from opera_fetch.download import download
 from opera_fetch.grid import clip, grid_like, place
-from opera_fetch.mosaic import mosaic
+from opera_fetch.mosaic import align_passes, mosaic
 from opera_fetch.search import as_dates, data_urls, search, search_static
-from opera_fetch.stack import align_passes, assemble, read_bursts
+from opera_fetch.stack import assemble, read_bursts
 from opera_fetch.validate import check_files, quicklook, report, summary
 from opera_fetch.workflow import fetch_stacks
 from opera_fetch.write import read, write

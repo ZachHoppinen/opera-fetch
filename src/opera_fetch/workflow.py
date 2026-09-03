@@ -6,8 +6,9 @@ from pathlib import Path
 from opera_fetch import constants as const
 from opera_fetch.aoi import as_geometry
 from opera_fetch.download import download
+from opera_fetch.mosaic import TOLERANCE
 from opera_fetch.search import data_urls, search, search_static
-from opera_fetch.stack import TOLERANCE, assemble
+from opera_fetch.stack import assemble
 from opera_fetch.validate import check_files, report, summary
 from opera_fetch.write import write
 

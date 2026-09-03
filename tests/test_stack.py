@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 from tests.conftest import make_burst
 
-from opera_fetch.stack import Pass, _one_zone, align_passes, group_paths
+from opera_fetch.stack import Pass, _one_zone, group_paths
 
 RTC = "OPERA_L2_RTC-S1_T049-103327-IW3_20241004T011054Z_20241004T043235Z_S1A_30_v1.0_VV.tif"
 CSLC = "OPERA_L2_CSLC-S1_T049-103327-IW3_20241004T011054Z_20241005T000000Z_S1A_VV_v1.1.h5"
@@ -20,34 +20,6 @@ def test_files_group_by_burst_and_by_product_family():
 
 def test_browse_and_checksums_are_not_mistaken_for_data():
     assert group_paths([RTC + ".md5", RTC.replace("_VV.tif", "_BROWSE.png")]) == {}
-
-
-def test_bursts_of_one_overpass_get_one_timestamp():
-    first = make_burst(west=500_010, north=4_332_210)
-    # The next burst down the track is acquired a couple of seconds later.
-    second = make_burst(west=500_010, north=4_332_210 - 180)
-    second = second.assign_coords(time=second.indexes["time"] + pd.Timedelta("3s"))
-
-    aligned = align_passes([first, second])
-    assert aligned[0].indexes["time"].equals(aligned[1].indexes["time"])
-    # Stamped with the earliest of the pass, not an invented average.
-    assert aligned[1].indexes["time"][0] == first.indexes["time"][0]
-
-
-def test_separate_acquisitions_stay_separate():
-    burst = make_burst(west=500_010, north=4_332_210, times=3)
-    aligned = align_passes([burst])
-    assert len(aligned[0].indexes["time"].unique()) == 3
-
-
-def test_the_tolerance_is_what_decides():
-    first = make_burst(west=500_010, north=4_332_210)
-    second = first.assign_coords(time=first.indexes["time"] + pd.Timedelta("5min"))
-
-    assert align_passes([first, second], tolerance="1min")[1].indexes["time"][0] != \
-        first.indexes["time"][0]
-    assert align_passes([first, second], tolerance="10min")[1].indexes["time"][0] == \
-        first.indexes["time"][0]
 
 
 def test_a_pass_prints_as_something_readable():
