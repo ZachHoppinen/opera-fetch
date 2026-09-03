@@ -116,6 +116,11 @@ def assemble(paths, aoi=None, aoi_crs=None, how=None, tolerance=TOLERANCE,
         layer takes neither: it is oversampled first and then read at nearest, which is
         the only way to move one without giving up coherence.
 
+        Nearest for real layers is a trade. Neighbouring UTM lattices do not align, so it
+        displaces a value by a median 12 m on a 30 m grid, where bilinear places it right
+        and costs 42% of the variance. It is the default because it invents nothing.
+        ``cubic`` and ``lanczos`` produce negative gamma0, which is a power ratio.
+
     Returns
     -------
     dict of {int: xarray.Dataset}

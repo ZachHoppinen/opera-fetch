@@ -111,6 +111,20 @@ We make the following reprojection choices. A mask is categorical, so it always 
 nearest. Real layers take `nearest` by default, which moves values without inventing any,
 and `resampling=` overrides that with any name from `rasterio.enums.Resampling`.
 
+**Nearest for real layers is a trade, not a clear win.** Neighbouring UTM lattices do not
+line up. Putting the East River zone 12 grid into zone 13 leaves every pixel centre a median
+12 m, and up to 21 m, from the nearest source centre on a 30 m grid, and it is a rotation
+and a slight scale change rather than a shift. So nearest returns a real observed gamma0
+with its speckle statistics intact, but attributes it to a cell up to two thirds of a pixel
+away. Bilinear puts it in the right place and removes 42% of the variance. Nearest is the
+default because it invents nothing, not because the error is small.
+
+Two things to know before overriding it. `cubic` and `lanczos` have negative lobes and
+produce negative gamma0, 0.12% and 0.35% of cells on that scene; gamma0 is a power ratio,
+so `10*log10` gives NaN there. And the oversampling used for CSLC does not transfer: gamma0
+is detected rather than complex, so it is not bandlimited to its own grid, and zero padding
+its spectrum also gives negatives.
+
 **A complex layer is sinc interpolated**, the same family OPERA geocodes complex data with.
 It happens in two steps rather than through a kernel. The layer is oversampled eight times over by zero padding its
 spectrum and the fine sample is then read directly.
