@@ -442,3 +442,75 @@ def test_auto_on_a_single_zone_resamples_nothing(caplog):
 
     assert np.array_equal(joined.vv.values, only.vv.values)
     assert "moves a value" not in caplog.text
+
+
+def _aoi_in_zone_13():
+    """A box near -106.9, which is UTM zone 13 and nowhere near zone 12's -114 to -108."""
+    from shapely.geometry import box
+
+    return box(-107.0, 38.85, -106.85, 38.95)
+
+
+def test_two_zones_covering_it_all_are_split_on_where_the_aoi_is():
+    """The likely case: both zones cover ~100% of the AOI and are imaged the same number
+    of times, so nothing about the data separates them and geography has to.
+    """
+    from opera_fetch.stack import _best_zone
+
+    # Same ground and same acquisitions, but the AOI reprojected into the zone it does not
+    # belong to spans more cells. Counting cells would read that inflation as more data.
+    wrong = make_burst(west=500_010, north=4_332_210, epsg=32612, columns=10, rows=10)
+    right = make_burst(west=500_010, north=4_332_210, epsg=32613, columns=8, rows=8)
+
+    assert _best_zone({32612: wrong, 32613: right}, _aoi_in_zone_13()) == 32613
+
+
+def test_a_zone_that_really_holds_more_still_wins_over_geography():
+    """Geography only settles a tie. Real data beats it, or auto would resample the bulk
+    of a time series to sit in a prettier zone.
+    """
+    from opera_fetch.stack import _best_zone
+
+    outside = make_burst(west=500_010, north=4_332_210, epsg=32612, times=8)
+    inside = make_burst(west=500_010, north=4_332_210, epsg=32613, times=2)
+
+    assert _best_zone({32612: outside, 32613: inside}, _aoi_in_zone_13()) == 32612
+
+
+def test_a_tie_without_an_aoi_still_lands_somewhere_repeatable():
+    """reproject_to works without an AOI, and then there is no geography to appeal to."""
+    from opera_fetch.stack import _best_zone
+
+    a = make_burst(west=500_010, north=4_332_210, epsg=32612)
+    b = make_burst(west=500_010, north=4_332_210, epsg=32613)
+    assert _best_zone({32612: a, 32613: b}) == 32612
+    assert _best_zone({32613: b, 32612: a}) == 32612
+
+
+def test_utm_zone_of_an_area():
+    from shapely.geometry import box
+
+    from opera_fetch.stack import _utm_zone
+
+    assert _utm_zone(_aoi_in_zone_13()) == 32613
+    assert _utm_zone(box(-110.0, 38.85, -109.9, 38.95)) == 32612
+    assert _utm_zone(box(-70.0, -34.0, -69.9, -33.9)) == 32719   # south of the equator
+    assert _utm_zone(box(11.0, 58.0, 11.1, 58.1)) == 32632        # the plain rule, zone 32
+
+
+def test_utm_zone_does_not_claim_to_know_the_norway_exceptions():
+    """Norway widens 32V and Svalbard uses 31X/33X/35X/37X, which the plain rule misses.
+
+    Harmless, because the answer is only consulted when it names one of the tied zones, and
+    a zone this does not name simply falls through to the lower EPSG.
+    """
+    from shapely.geometry import box
+
+    from opera_fetch.stack import _best_zone, _utm_zone
+
+    svalbard = box(11.0, 78.0, 11.1, 78.1)
+    assert _utm_zone(svalbard) == 32632, "the plain rule, not Svalbard's 33X"
+
+    tied = {32633: make_burst(west=500_010, north=8_600_010, epsg=32633),
+            32635: make_burst(west=500_010, north=8_600_010, epsg=32635)}
+    assert _best_zone(tied, svalbard) == 32633, "falls through to the lower EPSG"

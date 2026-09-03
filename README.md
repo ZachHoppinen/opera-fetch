@@ -88,12 +88,21 @@ stack = of.fetch_stacks(aoi, start, end, reproject_to="EPSG:32613")    # if you 
 
 You should not have to know your UTM zone to get one Dataset, so `"auto"` picks it.
 Whichever zone is chosen the others get resampled, so the choice is really which values
-stay put, and `"auto"` takes the zone holding the most of them: coverage and acquisitions
-together, not either alone. A zone covering two thirds of the AOI still loses to one
-covering a third of it four times as often, because that one has more data in it. The
-winner keeps the grid OPERA delivered, untouched. Ties go to the lower EPSG, so the same
-AOI picks the same zone on every run, and where there is only one zone, which is the usual
-case, `"auto"` resamples nothing at all and simply hands back that Dataset.
+stay put, and `"auto"` takes the zone holding the most of them. The winner keeps the grid
+OPERA delivered, untouched. Where there is only one zone, which is the usual case, `"auto"`
+resamples nothing at all and simply hands back that Dataset.
+
+Holdings are counted as a fraction of each zone's own grid, not in cells. Cells are not
+comparable between zones: the same AOI reprojected into a badly fitting zone spans more of
+them, and that inflation would read as more data. On the East River AOI, zone 12 grids at
+390x451 against zone 13's 381x442 for the same ground, a 4% head start for the zone the
+AOI is not in.
+
+In practice both zones cover very nearly all of the AOI, 99.77% and 99.96% on that same
+example, so acquisitions are what actually separate them. When those match too, neither
+zone is cheaper to keep, and the tie goes to the zone the AOI actually lies in. The plain
+longitude rule decides that, so it does not know the Norway and Svalbard exceptions; there
+it names no candidate and the tie falls to the lower EPSG, which is still repeatable.
 
 `reproject_to` is the only resampling in the package, which is why it has to be asked for
 by name.
