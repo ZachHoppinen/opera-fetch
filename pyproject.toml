@@ -13,25 +13,29 @@ authors = [{name = "Zach Hoppinen", email = "zachhoppinen@gmail.com"}]
 dependencies = [
     "asf_search",
     "dask",
-    "geopandas",
     "h5netcdf",
     "h5py",
     "numpy",
     "pandas",
     "pyproj",
-    "rasterio",
-    "rioxarray",
     "requests",
+    "rioxarray",
     "shapely",
     "tqdm",
     "xarray",
+    "zarr",
 ]
 
 [project.urls]
 Homepage = "https://github.com/ZachHoppinen/opera-fetch"
 
 [project.optional-dependencies]
-develop = ["pytest", "matplotlib", "zarr", "ruff", "build", "twine"]
+# Reading an AOI from a shapefile or GeoJSON. A GeoDataFrame you already hold works
+# without it; only opening a file needs geopandas.
+vector = ["geopandas"]
+# quicklook, and nothing else.
+plot = ["matplotlib"]
+develop = ["opera-fetch[vector,plot]", "pytest", "ruff", "build", "twine"]
 
 [tool.setuptools_scm]
 

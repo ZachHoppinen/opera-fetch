@@ -12,3 +12,4 @@ logs_*.txt
 
 # One-off analyses worth keeping on this machine but not in the history.
 scratch/
+notebooks/

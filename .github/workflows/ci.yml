@@ -25,6 +25,11 @@ jobs:
           # Cached on the environment.yml hash, so later runs skip the solve.
           cache-environment: true
 
+      - name: Install the development extras
+        # environment.yml is the lean runtime env, so the test and build tools come
+        # from the [develop] extra rather than being carried by every user.
+        run: pip install -e ".[develop]"
+
       - name: Lint
         run: ruff check src/ tests/ scripts/
 

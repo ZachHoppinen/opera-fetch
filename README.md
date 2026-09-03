@@ -151,6 +151,19 @@ conda env create -f environment.yml
 conda activate opera-fetch
 ```
 
+`environment.yml` is the runtime only. Two features are extras, so nobody pays for what
+they do not use, and the tests want both:
+
+```bash
+pip install -e ".[vector]"    # AOIs read from a shapefile or GeoJSON
+pip install -e ".[plot]"      # quicklook
+pip install -e ".[develop]"   # both, plus pytest, ruff, build, twine
+```
+
+A GeoDataFrame you already hold works without `[vector]`; only opening a file needs it.
+netCDF4 is deliberately not a dependency: every read and write names `engine="h5netcdf"`
+or `"zarr"`, so the netCDF C library is never touched.
+
 Downloads need an Earthdata login in `~/.netrc`; without it the ASF data pool answers 403.
 
 ```

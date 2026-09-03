@@ -35,6 +35,9 @@ jobs:
           # this job notices a dependency release that breaks us.
           cache-environment: false
 
+      - name: Install the development extras
+        run: pip install -e ".[develop]"
+
       - name: Write Earthdata credentials
         env:
           EARTHDATA_USERNAME: ${{ secrets.EARTHDATA_USERNAME }}

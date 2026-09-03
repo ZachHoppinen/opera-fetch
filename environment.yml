@@ -5,30 +5,26 @@ dependencies:
   # 3.14 writes netCDF correctly but ends in sys.excepthook noise at interpreter
   # shutdown, from rasterio/dask/h5py rather than from this package.
   - python=3.12
+
+  # Everything the package needs to run. rioxarray brings rasterio and GDAL;
+  # h5netcdf brings h5py. netCDF4 is deliberately absent: every read and write
+  # names engine="h5netcdf" or "zarr", so the netCDF C library is never touched.
   - asf_search
   - dask
-  - geopandas
   - h5netcdf
   - h5py
-  - matplotlib
-  - netcdf4
   - numpy
   - pandas
   - pyproj
-  - rasterio
-  - rioxarray
   - requests
+  - rioxarray
   - shapely
   - tqdm
   - xarray
   - zarr
-  # Development and CI: the workflows invoke all four.
-  - pytest
-  - ruff>=0.14
-  - python-build
-  - twine
+
   - pip
   - pip:
-      # Editable, and setuptools-scm reads the version from git, so a checkout
-      # needs its full history for this to resolve.
+      # setuptools-scm reads the version from git, so a checkout needs its history.
+      # Add [develop] for the tests, and [vector] or [plot] for those features.
       - -e .

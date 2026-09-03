@@ -238,7 +238,24 @@ def _one_zone(passes, epsg):
     They are already on the same grid, so join="exact" is a check rather than a
     constraint: anything else means a pass was built on a different lattice.
     """
-    stack = xr.concat(passes, dim="time", join="exact", combine_attrs="drop_conflicts")
+    timed = [name for name in passes[0].data_vars if "time" in passes[0][name].dims]
+    static = [name for name in passes[0].data_vars if "time" not in passes[0][name].dims]
+    stack = xr.concat([one[timed] for one in passes], dim="time", join="exact",
+                      combine_attrs="drop_conflicts")
+
+    for name in static:
+        layers = [one[name] for one in passes]
+        if _all_equal(layers):
+            # One track, or tracks whose geometry agrees: one layer for the whole zone
+            # rather than a copy per acquisition.
+            stack[name] = layers[0]
+        else:
+            # Two tracks see the ground from different angles, so this is not one layer.
+            stack[name] = xr.concat(
+                [layer.expand_dims(time=one.time) for layer, one in zip(layers, passes,
+                                                                        strict=True)],
+                dim="time")
+
     stack = stack.sortby("time")
 
     stack.attrs.update(
@@ -254,6 +271,16 @@ def _one_zone(passes, epsg):
     log.info("EPSG:%d: %d acquisitions over tracks %s on one %d by %d grid", epsg,
              stack.sizes["time"], stack.attrs["tracks"], stack.sizes["y"], stack.sizes["x"])
     return stack
+
+
+def _all_equal(layers):
+    """Whether every one of these layers holds the same values.
+
+    Compared per pass, not per acquisition: there are a handful of passes and the layers
+    are one band each, so this is cheap next to what it saves.
+    """
+    first = layers[0].values
+    return all(np.array_equal(first, other.values, equal_nan=True) for other in layers[1:])
 
 
 def _onto_one_crs(stacks, crs):
