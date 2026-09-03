@@ -86,7 +86,7 @@ coordinates, and forcing them to would mean resampling every pixel of one of the
 for the CSLCs should be done carefully and potentially not at all.
 
 Usually there is a single entry, and a large cross-zone AOI is the only thing that forces a second.
-When it does, `reproject_to` puts them on one grid and gives back a single Dataset:
+When it does, `reproject_to` can be used to put them on one grid and give back a single Dataset:
 
 ```python
 stack = of.fetch_stacks(aoi, start, end, reproject_to="auto")          # one Dataset
