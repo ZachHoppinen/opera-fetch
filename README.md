@@ -81,17 +81,13 @@ that forces a second.
 **Sinc reproject for complex, nearest for real.** The kernel follows what a layer holds.
 Real layers and the mask move by nearest. This means that reprojected real layers (RTC amplitude)
 will not be exactly from their grid locations since they are the nearest points in a 30m grid.
+Pass `resampling=` (i.e. `bilinear`) to RTC reproject exactly but this will change the opera values.
+It takes any name from `rasterio.enums.Resampling`, and the mask and the complex layers ignore it.
 Complex is sinc interpolated instead, since any kernel costs it coherence.
-
-Pass `resampling=` to put the real layers where they belong instead. It takes any name from
-`rasterio.enums.Resampling`, and the mask and the complex layers ignore it.
 
 ```python
 stack = of.fetch_stacks(aoi, start, end, reproject_to="auto", resampling="bilinear")
 ```
-
-`bilinear` places a value correctly and costs 42% of the variance. `cubic` and `lanczos`
-have negative lobes and produce negative gamma0, which a power ratio cannot be.
 
 **What comes back is xarray, and nothing else.** A `Dataset` per zone, dimensions
 `(time, y, x)`, one layer per variable, dask-backed so a season is not read until it is
