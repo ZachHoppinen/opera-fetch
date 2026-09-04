@@ -27,10 +27,22 @@ def spacing_of(obj):
     From the attribute where the object carries one, because a one-cell grid has no
     coordinate difference to read and a single-pixel time series is an ordinary thing to
     ask this package for.
+
+    Where the coordinates can be read too and disagree, the attribute still wins and the
+    disagreement is a warning: something re-gridded the object and left the attribute
+    behind, and everything that reads a footprint from here is then out by half the
+    difference.
     """
     spacing = obj.attrs.get("spacing")
     if spacing is not None:
-        return (float(spacing[0]), float(spacing[1]))
+        spacing = (float(spacing[0]), float(spacing[1]))
+        if obj.sizes.get("x", 0) > 1 and obj.sizes.get("y", 0) > 1:
+            measured = (float(abs(obj.x[1] - obj.x[0])), float(abs(obj.y[1] - obj.y[0])))
+            if not np.allclose(spacing, measured):
+                log.warning("the spacing attribute says %s but the coordinates are %s "
+                            "apart; the attribute is being used. Whatever re-gridded this "
+                            "did not update it.", spacing, measured)
+        return spacing
 
     if obj.sizes["x"] < 2 or obj.sizes["y"] < 2:
         raise ValueError(

@@ -142,3 +142,26 @@ def test_a_grid_with_no_spacing_to_read_says_so():
     del one.attrs["spacing"]
     with pytest.raises(ValueError, match="nothing to read the posting from"):
         spacing_of(one)
+
+
+def test_a_stale_spacing_attribute_is_called_out(caplog):
+    """coarsen moves the coordinates and leaves the attribute behind. The attribute still
+    wins, because a one-cell grid has nothing else, but a caller reading a footprint from
+    it is out by half the difference and has to be told."""
+    import logging
+
+    coarse = make_burst(west=500_010, north=4_332_210, columns=8, rows=6).coarsen(
+        x=2, y=2).mean()
+    coarse.attrs["spacing"] = (30.0, 30.0)
+
+    with caplog.at_level(logging.WARNING, logger="opera_fetch.grid"):
+        assert spacing_of(coarse) == (30.0, 30.0)
+    assert "60.0" in caplog.text and "30.0" in caplog.text
+
+
+def test_a_spacing_that_matches_the_coordinates_is_quiet(caplog):
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="opera_fetch.grid"):
+        assert spacing_of(make_burst(west=500_010, north=4_332_210)) == (30.0, 30.0)
+    assert caplog.text == ""

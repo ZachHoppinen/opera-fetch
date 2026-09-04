@@ -464,3 +464,83 @@ def test_auto_on_a_single_zone_resamples_nothing(caplog):
 
     assert np.array_equal(joined.vv.values, only[32612].vv.values)
     assert "moves a value" not in caplog.text
+
+
+def _zone(epsg, track, direction, granule, hours=0):
+    """One zone as assemble builds it: a pass, mosaicked, stamped and concatenated."""
+    from opera_fetch.mosaic import mosaic
+
+    burst = make_burst(west=500_010, north=4_332_210, epsg=epsg, track=track,
+                       direction=direction)
+    burst = burst.assign_coords(time=burst.indexes["time"] + pd.Timedelta(hours=hours))
+    burst.attrs.update(granules=granule, burst_id=f"T{track:03d}-103327-IW3")
+    return _one_zone([_stamped(mosaic([burst]), track, direction)], epsg)
+
+
+def test_zones_on_one_grid_keep_every_zone_s_provenance():
+    """Half an ascending stack was labelled DESCENDING, and one zone's granules were all
+    that survived. Nothing downstream can tell an overpass time from that."""
+    from opera_fetch.stack import _onto_one_crs
+
+    ascending = "OPERA_L2_RTC-S1_T049-103327-IW3_A"
+    descending = "OPERA_L2_RTC-S1_T056-103327-IW3_B"
+    zones = {32612: _zone(32612, 49, "ASCENDING", ascending),
+             32613: _zone(32613, 56, "DESCENDING", descending, hours=12)}
+
+    joined = _onto_one_crs(zones, "EPSG:32613")
+
+    assert joined.attrs["granules"].split("\n") == [ascending, descending]
+    assert joined.attrs["tracks"] == [49, 56]
+    assert joined.attrs["bursts"] == 2
+    assert joined.attrs["burst_id"] == "T049-103327-IW3, T056-103327-IW3"
+    # A single track or direction is a claim about all of the data, and it is not true.
+    assert "track" not in joined.attrs
+    assert "direction" not in joined.attrs
+    assert joined.attrs["product"] == "RTC", "what they do agree on stays"
+
+
+def test_one_zone_on_its_own_grid_keeps_its_labels():
+    """The pooling must not cost a single-zone stack the track it does have."""
+    from opera_fetch.stack import _onto_one_crs
+
+    zones = {32612: _zone(32612, 49, "ASCENDING", "OPERA_L2_RTC-S1_T049-103327-IW3_A")}
+    joined = _onto_one_crs(zones, "EPSG:32612")
+
+    assert joined.attrs["track"] == 49
+    assert joined.attrs["direction"] == "ASCENDING"
+    assert joined.attrs["tracks"] == [49]
+
+
+def test_a_track_can_be_picked_out_of_a_cache():
+    """A cache holds whatever was ever downloaded into it, and the per-orbit workflow has
+    no other way to ask for one pass out of it."""
+    from opera_fetch.stack import _asked_for
+
+    ascending = Pass(49, "ASCENDING", 32612)
+    descending = Pass(56, "DESCENDING", 32613)
+
+    assert _asked_for(ascending, None, None) and _asked_for(descending, None, None)
+    assert _asked_for(ascending, 49, None) and not _asked_for(descending, 49, None)
+    assert _asked_for(ascending, [49, 56], None) and _asked_for(descending, [49, 56], None)
+    assert _asked_for(ascending, None, "ascending"), "the case is not the caller's problem"
+    assert not _asked_for(descending, None, "ASCENDING")
+    assert not _asked_for(descending, 56, "ASCENDING"), "both have to match"
+
+
+def test_a_filter_that_matches_nothing_says_what_was_there():
+    """Silently returning an empty stack would look like an empty date range."""
+    from opera_fetch.errors import NoAcquisitions
+    from opera_fetch.stack import assemble
+
+    import opera_fetch.stack as stack_module
+
+    def one_ascending_burst(paths, **kwargs):
+        return [make_burst(west=500_010, north=4_332_210, track=49, direction="ASCENDING")]
+
+    original = stack_module.read_bursts
+    stack_module.read_bursts = one_ascending_burst
+    try:
+        with pytest.raises(NoAcquisitions, match="T049 ascending"):
+            assemble([RTC], track=56)
+    finally:
+        stack_module.read_bursts = original

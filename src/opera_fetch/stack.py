@@ -25,6 +25,7 @@ from opera_fetch.aoi import as_geometry
 from opera_fetch.errors import NoAcquisitions
 from opera_fetch.grid import clip, reproject
 from opera_fetch.mosaic import TOLERANCE, align_passes, mosaic
+from opera_fetch.search import _listed
 
 log = logging.getLogger(__name__)
 
@@ -82,7 +83,8 @@ def read_bursts(paths, chunks=None, extra=()):
 
 
 def assemble(paths, aoi=None, aoi_crs=None, how=None, tolerance=TOLERANCE,
-             chunks=None, extra=(), mask=False, reproject_to=None, resampling=None):
+             chunks=None, extra=(), mask=False, reproject_to=None, resampling=None,
+             track=None, direction=None):
     """Read, mosaic and stack every burst among the given files, one Dataset per UTM zone.
 
     Parameters
@@ -120,6 +122,11 @@ def assemble(paths, aoi=None, aoi_crs=None, how=None, tolerance=TOLERANCE,
         displaces a value by a median 12 m on a 30 m grid, where bilinear places it right
         and costs 42% of the variance. It is the default because it invents nothing.
         ``cubic`` and ``lanczos`` produce negative gamma0, which is a power ratio.
+    track, direction
+        Keep only bursts on these relative orbits, or on ``"ASCENDING"`` or
+        ``"DESCENDING"``. track takes one track or several. A cache holds whatever has ever
+        been downloaded into it, and this is the only way to pick a pass back out of it
+        short of filtering paths by filename.
 
     Returns
     -------
@@ -136,10 +143,20 @@ def assemble(paths, aoi=None, aoi_crs=None, how=None, tolerance=TOLERANCE,
     """
     # A pass is what may be averaged together: one track, one direction, one zone.
     # Ascending and descending land on the same day and must not be mixed in a mosaic.
-    passes = defaultdict(list)
+    found = defaultdict(list)
     for burst in read_bursts(paths, chunks=chunks, extra=extra):
-        passes[Pass(burst.attrs["track"], burst.attrs["direction"],
-                    CRS.from_user_input(burst.rio.crs).to_epsg())].append(burst)
+        found[Pass(burst.attrs["track"], burst.attrs["direction"],
+                   CRS.from_user_input(burst.rio.crs).to_epsg())].append(burst)
+
+    passes = {key: group for key, group in found.items() if _asked_for(key, track, direction)}
+    if not passes:
+        # Only reachable through the filter: read_bursts has already refused an empty set.
+        raise NoAcquisitions(
+            f"no pass matches {_filter_text(track, direction)}; these files hold "
+            f"{sorted(str(key) for key in found)}")
+    if len(passes) < len(found):
+        log.info("%d of %d passes match %s", len(passes), len(found),
+                 _filter_text(track, direction))
 
     if aoi is not None:
         aoi = as_geometry(aoi, aoi_crs)
@@ -187,6 +204,20 @@ def assemble(paths, aoi=None, aoi_crs=None, how=None, tolerance=TOLERANCE,
     if reproject_to is not None:
         return _onto_one_crs(stacks, reproject_to, resampling)
     return stacks
+
+
+def _asked_for(key, track, direction):
+    """Whether a pass is one the caller wants, with None meaning no restriction."""
+    if track is not None and key.track not in {int(t) for t in _listed(track)}:
+        return False
+    return direction is None or key.direction.upper() == str(direction).upper()
+
+
+def _filter_text(track, direction):
+    """The track and direction filter as something to put in a message."""
+    asked = [f"track {track}" if track is not None else None,
+             str(direction).lower() if direction is not None else None]
+    return " ".join(part for part in asked if part) or "no filter"
 
 
 def _one_zone(passes, epsg):
@@ -326,7 +357,9 @@ def _onto_one_crs(stacks, crs, resampling=None):
             matched[name] = _oversampled_reproject(stack[name], reference)
         moved.append(matched)
 
-    joined = xr.concat(moved, dim="time", join="outer").sortby("time")
+    # data_vars pinned: its default is changing, and a zone's static layer differs from
+    # another zone's, so they have to concatenate rather than be taken as one.
+    joined = xr.concat(moved, dim="time", join="outer", data_vars="all").sortby("time")
 
     # Reprojecting floats a mask wherever a cell has no source, and a class code is not a
     # float. Those cells are no observation, which the mask already has a code for.
@@ -336,9 +369,38 @@ def _onto_one_crs(stacks, crs, resampling=None):
             joined[name] = (joined[name].fillna(const.MASK_NODATA[product])
                             .astype(const.MASK_DTYPE[product]))
 
-    joined.attrs = dict(reference.attrs)
+    joined.attrs = _across_zones([stacks[epsg] for epsg in sorted(stacks)])
     joined.attrs.update(epsg=target.to_epsg(), reprojected_from=sorted(stacks))
     return joined
+
+
+def _across_zones(stacks):
+    """The attributes of several zones on one grid, which are not the reference zone's.
+
+    Taking one zone's dict wholesale labelled the whole stack with that zone's track and
+    direction, and dropped the granules every other zone contributed. Anything the zones
+    disagree on goes, the same way concatenating passes within a zone drops it, and what
+    the zones each hold a share of is pooled.
+    """
+    import shapely
+    import shapely.wkt
+
+    shared = {key: value for key, value in stacks[0].attrs.items()
+              if all(other.attrs.get(key) == value for other in stacks[1:])}
+
+    outlines = [shapely.wkt.loads(s.attrs["footprint"]) for s in stacks
+                if s.attrs.get("footprint")]
+    return shared | {
+        "tracks": sorted({t for s in stacks
+                          for t in (s.attrs.get("tracks") or [s.attrs.get("track")]) if t}),
+        "bursts": sum(s.attrs.get("bursts", 1) for s in stacks),
+        "burst_id": ", ".join(sorted({b for s in stacks
+                                      for b in s.attrs.get("burst_id", "").split(", ") if b})),
+        "granules": "\n".join(sorted({g for s in stacks
+                                      for g in s.attrs.get("granules", "").split("\n") if g})),
+        "footprint": shapely.union_all(outlines).wkt if outlines else "",
+        "created": datetime.now(UTC).isoformat(timespec="seconds"),
+    }
 
 
 def _oversampled_reproject(field, reference):
