@@ -2,6 +2,36 @@
 
 ## 0.2.0
 
+### What a caller has to know
+
+- A multi-zone stack no longer carries `track` or `direction` in its attributes, because
+  it had more than one of each and was naming one. Read `tracks` for the set, or the
+  per-acquisition `track` and `direction` coordinates on the time axis, which were always
+  right. A single-zone stack is unchanged.
+- `as_geometry` returns a MultiPolygon where the input has several parts, rather than
+  their convex hull. Pass it through `aoi.one_polygon` if you need the single outline
+  ASF's search takes; clipping wants the parts.
+- `report` raises on three states it used to pass over: a grid that does not meet the AOI,
+  a mask code OPERA does not define, and a stack holding nothing but the no-observation
+  code. A stack that reported clean before and raises now was already wrong.
+- Variables written to netCDF and Zarr no longer carry `_FillValue`. Written down, CF
+  decoding read it back as a gap and returned the layover mask as float with NaN where the
+  class code was. `flag_meanings` still names the codes, the nodata among them.
+- `search._listed` is `search.as_list`, since two modules use it and it was never private.
+
+New, all additive: `assemble(track=..., direction=...)` to pick a pass out of a cache,
+`search.file_sizes`, `aoi.one_polygon`, `grid.mask_codes` and `grid.measured_spacing`.
+
+### Known limitation
+
+netCDF cannot hold a one-element list attribute: it reads back as a scalar whatever it was
+written as, so a single-track stack saved as `.nc` returns `tracks=49` rather than `[49]`.
+Zarr keeps the list. Anything reading `tracks` off a file has to cope with both, which is
+what `search.as_list` is for. `tests/test_golden.py` pins this so it cannot spread to
+another attribute unnoticed.
+
+### Fixed
+
 Multi-zone stacks kept only one zone's provenance. A stack assembled from T049 in
 EPSG:32612 and T056 in EPSG:32613 came back labelled `track: 56`, `direction: DESCENDING`
 and listing only the T056 granules, on data that was half ascending and from two tracks.
@@ -73,6 +103,17 @@ answer.
   the same time.
 - Pooling zone attributes copes with values a round trip has turned into arrays and
   scalars, where it raised on the comparison.
+
+### Tests
+
+`tests/test_golden.py` runs `assemble` over synthetic OPERA granules written to disk and
+compares everything that comes out against a digest in `tests/golden/`. It needs no network
+and no cache, so it runs in CI, and it is what catches a change to the shape of the output
+that no single unit test is looking at. Regenerate with `OPERA_FETCH_GOLDEN=update`.
+
+The synthetic fixtures also fill with a value per cell rather than a constant, and carry a
+`(y, x)` layer. A constant fill survives being shifted, transposed, or replaced by another
+constant, and the tests that promised nothing had moved were passing on that.
 
 ## 0.1.0
 
