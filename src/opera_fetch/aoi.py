@@ -35,12 +35,7 @@ def as_geometry(aoi, crs=None):
         geometry = shapely_transform(
             Transformer.from_crs(crs, WGS84, always_xy=True).transform, geometry)
 
-    if geometry.geom_type == "MultiPolygon":
-        # ASF takes one polygon, and searching wide costs nothing: clipping happens later.
-        log.warning("AOI is %d separate polygons; searching their convex hull",
-                    len(geometry.geoms))
-        geometry = geometry.convex_hull
-    if geometry.geom_type != "Polygon":
+    if geometry.geom_type not in ("Polygon", "MultiPolygon"):
         raise ValueError(f"AOI must be a polygon, not a {geometry.geom_type}")
     if geometry.is_empty or geometry.area == 0:
         raise ValueError("AOI has no area")
@@ -58,6 +53,20 @@ def as_geometry(aoi, crs=None):
             "each side: they fall in different UTM zones and cannot share one grid.")
 
     return geometry
+
+
+def one_polygon(geometry):
+    """One polygon covering an area, which is all ASF's search takes.
+
+    Separate polygons become their convex hull, which is wider than what was asked for.
+    Only the search sees this: clipping keeps the outline the caller gave, or the product
+    would cover ground nobody asked about.
+    """
+    if geometry.geom_type != "MultiPolygon":
+        return geometry
+    log.warning("AOI is %d separate polygons; searching their convex hull. What comes "
+                "back is still clipped to the polygons themselves", len(geometry.geoms))
+    return geometry.convex_hull
 
 
 def _in_range(geometry, assumed_lonlat):

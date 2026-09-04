@@ -119,3 +119,16 @@ def test_what_varies_between_acquisitions_rides_on_the_time_axis(rtc_paths):
     assert all(str(p).startswith("S1") for p in burst.platform.values)
     assert (burst.absolute_orbit.values > 0).all()
     assert burst.absolute_orbit.to_index().is_unique
+
+
+def test_a_stack_names_only_the_granules_it_used(rtc_paths):
+    """A superseded granule contributed nothing, and a stack that names it cannot be told
+    apart from one that used it. That is the whole point of carrying the IDs."""
+    from opera_fetch import filenames
+
+    burst = read_burst(rtc_paths)
+    named = [g for g in burst.attrs["granules"].split("\n") if g]
+
+    assert len(named) == burst.sizes["time"], "one surviving granule per acquisition"
+    stamps = [filenames.parse_acquisition_time(g) for g in named]
+    assert len(set(stamps)) == len(stamps), "no acquisition named twice"

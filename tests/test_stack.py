@@ -620,3 +620,38 @@ def test_a_pass_is_empty_only_when_every_acquisition_of_it_is():
 
     stack["vv"][:] = np.nan
     assert not _has_data(stack)
+
+
+def test_zone_attributes_survive_a_round_trip(tmp_path):
+    """Fresh from assemble the attributes are tuples; after a write and a read they are
+    ndarrays, and comparing two of those with == gives an array bool() refuses."""
+    from opera_fetch.stack import _across_zones
+    from opera_fetch.write import read, write
+
+    zones = {32612: _zone(32612, 49, "ASCENDING", "OPERA_L2_RTC-S1_T049-103327-IW3_A"),
+             32613: _zone(32613, 56, "DESCENDING", "OPERA_L2_RTC-S1_T056-103327-IW3_B",
+                          hours=12)}
+    back = read(write(zones, tmp_path / "zones.nc"))
+
+    pooled = _across_zones([back["EPSG32612"], back["EPSG32613"]])
+    assert pooled["granules"].count("\n") == 1, "both zones' granules"
+    assert "track" not in pooled
+
+
+def test_a_pass_short_of_a_layer_does_not_float_the_mask(caplog):
+    """The outer join pads what a pass has not got, and a padded mask is a float one with
+    NaN where the code for no observation belongs."""
+    import logging
+
+    from opera_fetch.stack import _stacked_in_time
+
+    a = make_burst(**ZONE12, times=1)
+    b = make_burst(**ZONE12, times=1).drop_vars("mask")
+    b = b.assign_coords(time=b.indexes["time"] + pd.Timedelta("12D"))
+
+    with caplog.at_level(logging.WARNING, logger="opera_fetch.stack"):
+        stacked = _stacked_in_time([a, b], join="exact")
+
+    assert stacked["mask"].dtype == np.uint8
+    assert sorted(np.unique(stacked["mask"].values).tolist()) == [0, 255]
+    assert "mask" in caplog.text

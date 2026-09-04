@@ -266,7 +266,9 @@ def _stacked_in_time(parts, join):
                  for layer, part in zip(layers, holding, strict=True)], dim="time")
             stack[name] = per_time.reindex(time=stack.time)
 
-    return stack
+    # Both branches above fill: an outer join where a pass is short, a reindex where a
+    # static layer is. A class code is not a float, and NaN is not one of OPERA's codes.
+    return mask_codes(stack)
 
 
 def _one_zone(passes, epsg):
@@ -414,13 +416,16 @@ def _across_zones(stacks):
     import shapely.wkt
 
     shared = {key: value for key, value in stacks[0].attrs.items()
-              if all(other.attrs.get(key) == value for other in stacks[1:])}
+              if all(_same(other.attrs.get(key), value) for other in stacks[1:])}
 
     outlines = [shapely.wkt.loads(s.attrs["footprint"]) for s in stacks
                 if s.attrs.get("footprint")]
     return shared | {
-        "tracks": sorted({t for s in stacks
-                          for t in (s.attrs.get("tracks") or [s.attrs.get("track")]) if t}),
+        # _listed because a one-element list attribute comes back from netCDF as a bare
+        # scalar, so a single-track zone read from disk has tracks=49 rather than [49].
+        "tracks": sorted({int(t) for s in stacks
+                          for t in _listed(s.attrs.get("tracks") or s.attrs.get("track"))
+                          if t is not None}),
         "bursts": sum(s.attrs.get("bursts", 1) for s in stacks),
         "burst_id": ", ".join(sorted({b for s in stacks
                                       for b in s.attrs.get("burst_id", "").split(", ") if b})),
@@ -429,6 +434,17 @@ def _across_zones(stacks):
         "footprint": shapely.union_all(outlines).wkt if outlines else "",
         "created": datetime.now(UTC).isoformat(timespec="seconds"),
     }
+
+
+def _same(a, b):
+    """Whether two attribute values agree, for values a round trip may have made arrays.
+
+    ``spacing`` and ``tracks`` are tuples fresh from assemble and ndarrays after a write
+    and a read, and comparing two of those with == gives an array, which bool() refuses.
+    """
+    if isinstance(a, np.ndarray) or isinstance(b, np.ndarray):
+        return np.array_equal(np.asarray(a), np.asarray(b))
+    return bool(a == b)
 
 
 def _oversampled_reproject(field, reference):

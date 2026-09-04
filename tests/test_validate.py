@@ -82,3 +82,39 @@ def test_a_single_acquisition_still_plots(tmp_path):
     pytest.importorskip("matplotlib")
     burst = make_burst(west=500_010, north=4_332_210, times=1)
     assert quicklook(burst, tmp_path / "one.png").exists()
+
+
+def test_a_mask_code_opera_does_not_define_is_damage():
+    """MASK_MEANINGS is the forecaster-facing flag_meanings, so a code outside it is not
+    a class anyone can act on."""
+    from opera_fetch.validate import report
+
+    stack = make_burst(west=500_010, north=4_332_210)
+    stack["mask"][:] = 42
+    with pytest.raises(ValueError, match="42, which OPERA does not define"):
+        report(stack)
+
+
+def test_a_stack_of_nothing_but_the_nodata_code_is_not_fully_covered():
+    """255 is finite, and astype(bool) on it is True, so a stack holding no observation
+    at all reported 100% coverage and no damage."""
+    from opera_fetch.validate import primary_variable, report
+
+    stack = make_burst(west=500_010, north=4_332_210).drop_vars(
+        ["vv", "local_incidence_angle"])
+    stack["mask"][:] = 255
+
+    assert primary_variable(stack) == "mask", "there is nothing else to report on"
+    with pytest.raises(ValueError, match="no acquisition has a single finite pixel"):
+        report(stack)
+
+
+def test_a_grid_that_misses_the_aoi_entirely_is_damage():
+    """aoi_covered was computed correctly from the first version and never looked at."""
+    from shapely.geometry import box
+
+    from opera_fetch.validate import report
+
+    stack = make_burst(west=500_010, north=4_332_210)
+    with pytest.raises(ValueError, match="do not overlap"):
+        report(stack, aoi=box(-100.0, 30.0, -99.9, 30.1))

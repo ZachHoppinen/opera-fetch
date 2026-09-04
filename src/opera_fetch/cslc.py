@@ -60,8 +60,9 @@ def read_burst(paths, chunks=CHUNK, extra=()):
         platform=("time", [identities[t]["mission_id"] for t in times]),
         absolute_orbit=("time", [int(identities[t]["absolute_orbit_number"]) for t in times]))
 
+    # The granules that survived the dedupe, not every granule read.
     metadata.describe(stack, const.CSLC, identify(identities[times[0]]),
-                      [Path(p).stem for p in acquisitions])
+                      [Path(acquisitions[i]).stem for i in sorted(latest.values())])
     stack = _add_static(stack, paths, chunks)
 
     log.info("burst %s: %d acquisitions on a %s grid",

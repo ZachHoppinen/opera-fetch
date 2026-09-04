@@ -94,3 +94,31 @@ def test_a_declared_mask_nodata_does_not_come_back_as_a_gap(tmp_path, suffix):
 
     assert back["mask"].dtype == np.uint8
     assert sorted(np.unique(back["mask"].values).tolist()) == [0, 255]
+
+
+def test_a_truncated_cached_file_is_fetched_again(tmp_path, caplog):
+    """A killed transfer leaves a file with the right name and the right shape. Only the
+    length says otherwise, and ASF declares it in the search result."""
+    import logging
+
+    from opera_fetch.download import _fetch
+
+    path = tmp_path / "OPERA_L2_RTC-S1_T049-103327-IW3_VV.tif"
+    path.write_bytes(b"x" * 100)
+
+    # No declared size: the old behaviour, and all a bare cache can do.
+    assert _fetch(None, f"https://example/{path.name}", tmp_path, 3, 60, {}) == path
+
+    tried = []
+
+    class Session:
+        def get(self, url, **kwargs):
+            tried.append(url)
+            raise OSError("not fetching in a test")
+
+    with caplog.at_level(logging.WARNING, logger="opera_fetch.download"):
+        with pytest.raises(OSError):
+            _fetch(Session(), f"https://example/{path.name}", tmp_path, 1, 60,
+                   {path.name: 6_580_000})
+    assert tried, "the short file was not taken as cached"
+    assert "100 bytes on disk against 6580000 declared" in caplog.text

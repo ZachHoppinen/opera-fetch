@@ -45,10 +45,19 @@ def test_repairs_a_self_intersecting_polygon():
     assert as_geometry(bowtie).is_valid
 
 
-def test_a_multipart_aoi_becomes_its_hull_with_a_warning(caplog):
+def test_a_multipart_aoi_is_searched_as_its_hull_and_kept_as_itself(caplog):
+    """The hull is what ASF's search takes. Clipping to it as well would deliver ground
+    the caller did not ask about: here the hull is three and a half times the area."""
+    from opera_fetch.aoi import one_polygon
+
     parts = gpd.GeoDataFrame(geometry=[box(0, 0, 1, 1), box(3, 3, 4, 4)], crs="EPSG:4326")
     geometry = as_geometry(parts)
-    assert geometry.geom_type == "Polygon"
+    assert geometry.geom_type == "MultiPolygon", "what gets clipped is what was asked for"
+    assert geometry.area == 2
+
+    searched = one_polygon(geometry)
+    assert searched.geom_type == "Polygon"
+    assert searched.area == 7
     assert "convex hull" in caplog.text
 
 

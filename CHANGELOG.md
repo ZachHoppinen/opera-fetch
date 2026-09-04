@@ -55,6 +55,24 @@ answer.
   a latitude past 90, degenerates the polygon and returns nothing. A transposed pair and a
   forgotten `aoi_crs` each get told what they look like. A box with south above north is
   refused too, where `shapely.box` quietly swapped them.
+- The convex hull of a multipart AOI is what ASF is asked and nothing more. `as_geometry`
+  returns the polygons themselves now and `search` takes the hull, so what comes back is
+  clipped to the area the caller gave rather than to a hull that can be several times
+  larger.
+- A stack names the granules that contributed to it. Both readers passed the granule list
+  from before the reprocessing dedupe, so a superseded granule was named alongside the one
+  that replaced it.
+- `report` fires on three things it was computing and ignoring: a grid that does not meet
+  the AOI at all, a mask code OPERA does not define, and a stack of nothing but the
+  no-observation code, which came back as fully covered because 255 is finite.
+- `download` compares a cached file against the length ASF declares, given
+  `search.file_sizes`. A transfer killed partway through left a file with the right name
+  and the right shape, and it was a cache hit for good.
+- `mosaic(how="first")` and a pass short of a layer leave the mask an integer. Both fill,
+  and this is the default for complex data, so every CSLC mosaic carried 127.0 and NaN at
+  the same time.
+- Pooling zone attributes copes with values a round trip has turned into arrays and
+  scalars, where it raised on the comparison.
 
 ## 0.1.0
 

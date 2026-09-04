@@ -10,6 +10,7 @@ from pathlib import Path
 
 import numpy as np
 
+from opera_fetch import constants as const
 from opera_fetch.grid import bounds_of, reproject, spacing_of
 
 log = logging.getLogger(__name__)
@@ -64,9 +65,9 @@ def report(stack, aoi=None, strict=True):
         "bursts": stack.attrs.get("bursts", 1),
     }
 
-    # Coverage over every finite pixel, with no mask or threshold applied.
+    # Coverage over every observed pixel, with no mask or threshold applied.
     if times is not None:
-        finite = np.isfinite(stack[primary_variable(stack)]).mean(dim=("y", "x"))
+        finite = _observed(stack[primary_variable(stack)], stack).mean(dim=("y", "x"))
         if hasattr(finite.data, "compute"):
             finite = finite.compute()
         finite = np.asarray(finite)
@@ -91,6 +92,13 @@ def report(stack, aoi=None, strict=True):
         damage.append("the time axis is not in order")
     if times is not None and found["median_coverage"] == 0:
         damage.append("no acquisition has a single finite pixel")
+    if found.get("aoi_covered") == 0:
+        # Computed since the first version and never looked at, so a stack of the wrong
+        # area passed with no damage at all.
+        damage.append("the grid and the AOI do not overlap")
+    stray = _undefined_codes(stack)
+    if stray:
+        damage.append(f"the mask holds {stray}, which OPERA does not define")
 
     if found.get("empty_times"):
         log.warning("%d acquisition(s) are entirely empty over this area",
@@ -170,16 +178,50 @@ def quicklook(stack, path, variable=None, figsize=(6, 4), dpi=150):
 
 
 def primary_variable(stack):
-    """The variable a report is about: the first real data layer, not a static one."""
+    """The variable a report is about: the first real data layer, not a static one.
+
+    A mask only where there is nothing else. Reported on as though it were backscatter, a
+    stack of nothing but the no-observation code came back as fully covered, because 255
+    is finite and every cell of it is True.
+    """
     for name in ("vv", "hh", "vh", "hv"):
         if name in stack.data_vars:
             return name
-    for name, array in stack.data_vars.items():
-        if "time" in array.dims:
+    timed = [name for name, array in stack.data_vars.items() if "time" in array.dims]
+    for name in timed:
+        if not name.endswith("mask"):
             return name
     if not stack.data_vars:
         raise ValueError("the stack holds no variables")
-    return next(iter(stack.data_vars))
+    return next(iter(timed), next(iter(stack.data_vars)))
+
+
+def _observed(array, stack):
+    """Where a layer holds an observation, which for a mask is not the same as finite.
+
+    255 is a perfectly finite number and it means no observation was made.
+    """
+    if array.dtype.kind == "f":
+        return np.isfinite(array)
+    return array != const.MASK_NODATA[stack.attrs.get("product", const.RTC)]
+
+
+def _undefined_codes(stack):
+    """Mask codes OPERA does not define, as text, or "" when there are none.
+
+    The meanings are the forecaster-facing flag_meanings, so a code outside them is not a
+    class anyone can act on.
+    """
+    product = stack.attrs.get("product", const.RTC)
+    known = {int(entry.split()[0]) for entry in const.MASK_MEANINGS.split(",")}
+    known.add(int(const.MASK_NODATA[product]))
+
+    stray = set()
+    for name, array in stack.data_vars.items():
+        if not name.endswith("mask") or array.dtype.kind == "f":
+            continue
+        stray |= {int(code) for code in np.unique(np.asarray(array)) if int(code) not in known}
+    return ", ".join(str(code) for code in sorted(stray))
 
 
 def _aoi_fraction(stack, aoi):

@@ -182,3 +182,19 @@ def test_looks_nobody_knows_stay_unknown():
 
     merged = mosaic([a, b])
     assert np.isnan(float(merged.number_of_looks.isel(y=0, x=6)))
+
+
+def test_taking_the_first_burst_leaves_the_mask_an_integer():
+    """combine_first fills, and a filled mask is a float one. This is the default for
+    complex data, so every CSLC mosaic carried 127.0 and NaN at the same time."""
+    from opera_fetch.mosaic import mosaic
+
+    a = make_burst(west=500_010, north=4_332_210, columns=8)
+    b = make_burst(west=500_010 + 8 * 30, north=4_332_210, columns=8)
+    b.attrs["burst_id"] = "T049-103328-IW3"
+    b["mask"][:] = 1
+
+    merged = mosaic([a, b], how="first")
+
+    assert merged["mask"].dtype == np.uint8
+    assert set(np.unique(merged["mask"].values).tolist()) <= {0, 1, 2, 3, 255}

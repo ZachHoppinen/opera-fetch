@@ -11,11 +11,17 @@ log = logging.getLogger(__name__)
 CHUNK = 1 << 18
 
 
-def download(urls, cache_dir, max_workers=10, retries=3, timeout=60, session=None):
+def download(urls, cache_dir, max_workers=10, retries=3, timeout=60, session=None,
+             sizes=None):
     """Download each URL into cache_dir, skipping what is already there.
 
     Returns local paths in the order given. Credentials come from an Earthdata login in
     ~/.netrc, which the ASF data pool requires: without one every request answers 403.
+
+    sizes is {filename: bytes} as ASF declares them, from ``search.file_sizes``. Without
+    it a cached file counts as done when it exists and is not empty, so a transfer killed
+    partway through is a cache hit for good: it is the right name and the right shape, and
+    only the length says otherwise.
 
     Most of the cost is the TCP and TLS handshake rather than the transfer, so one
     keep-alive session is shared across the pool.
@@ -36,18 +42,23 @@ def download(urls, cache_dir, max_workers=10, retries=3, timeout=60, session=Non
             pool_connections=max_workers, pool_maxsize=max_workers, max_retries=0))
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        fetched = pool.map(lambda url: _fetch(session, url, cache_dir, retries, timeout), urls)
+        fetched = pool.map(
+            lambda url: _fetch(session, url, cache_dir, retries, timeout, sizes or {}), urls)
         paths = list(tqdm(fetched, total=len(urls), desc="downloading"))
 
     log.info("%d files in %s", len(paths), cache_dir)
     return paths
 
 
-def _fetch(session, url, cache_dir, retries, timeout):
+def _fetch(session, url, cache_dir, retries, timeout, sizes):
     """One file into the cache, retried, returning where it landed."""
     path = cache_dir / Path(url).name
     if path.exists() and path.stat().st_size:
-        return path
+        expected = sizes.get(path.name)
+        if not expected or path.stat().st_size == expected:
+            return path
+        log.warning("%s is %d bytes on disk against %d declared; fetching it again",
+                    path.name, path.stat().st_size, expected)
 
     # An interrupted transfer must not land where the check above reads it as cached.
     part = path.with_name(path.name + ".part")

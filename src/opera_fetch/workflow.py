@@ -7,7 +7,7 @@ from opera_fetch import constants as const
 from opera_fetch.aoi import as_geometry
 from opera_fetch.download import download
 from opera_fetch.mosaic import TOLERANCE
-from opera_fetch.search import data_urls, search, search_static
+from opera_fetch.search import data_urls, file_sizes, search, search_static
 from opera_fetch.stack import assemble
 from opera_fetch.validate import check_files, report, summary
 from opera_fetch.write import write
@@ -146,11 +146,16 @@ def fetch_stacks(aoi, start=None, end=None, product=const.RTC, cache_dir="data/r
         raise ValueError(f"ASF has no {product} granules for that area and date range")
     # data_urls logs the size, so the volume is known before anything is fetched.
     urls = data_urls(found, layers)
+    sizes = file_sizes(found, layers)
     if static:
-        urls += data_urls(search_static(found), static_layers)
+        # One search: it costs a request, and the sizes come out of the same frame.
+        statics = search_static(found)
+        urls += data_urls(statics, static_layers)
+        sizes |= file_sizes(statics, static_layers)
 
     log.info("step 3/6  downloading %d files", len(urls))
-    paths = download(urls, cache_dir, max_workers=max_workers)
+    # The sizes are what tells a finished file from one a killed transfer left behind.
+    paths = download(urls, cache_dir, max_workers=max_workers, sizes=sizes)
 
     # The cache may hold a file some earlier run left half written, which the
     # exists-and-not-empty check reads as done. Opening them says otherwise.

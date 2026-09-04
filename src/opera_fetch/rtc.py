@@ -68,7 +68,8 @@ def read_burst(paths, chunks=CHUNK):
         orbits.append(int(first.attrs.get("ABSOLUTE_ORBIT_NUMBER", -1)))
 
     # Drop reprocessed duplicates, then put what survives in time order.
-    keep = sorted(filenames.keep_latest_processing(times, list(granules)).values())
+    names = list(granules)
+    keep = sorted(filenames.keep_latest_processing(times, names).values())
     slices = [slices[i] for i in keep]
     platforms = [platforms[i] for i in keep]
     orbits = [orbits[i] for i in keep]
@@ -83,7 +84,9 @@ def read_burst(paths, chunks=CHUNK):
         platform=("time", [platforms[i] for i in order]),
         absolute_orbit=("time", [orbits[i] for i in order]))
     # Identity and units from the tags, then the once-per-burst layers.
-    stack = _describe(stack, tags, granules)
+    # The granules that survived, not every granule read: a superseded one contributed
+    # nothing, and a stack that names it cannot be told apart from one that used it.
+    stack = _describe(stack, tags, [names[i] for i in keep])
     stack = _add_static(stack, paths, chunks)
 
     log.info("burst %s: %d acquisitions on a %s grid",

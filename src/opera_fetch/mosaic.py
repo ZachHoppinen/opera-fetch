@@ -19,7 +19,7 @@ import pandas as pd
 import xarray as xr
 
 from opera_fetch import constants as const
-from opera_fetch.grid import grid_like, place
+from opera_fetch.grid import grid_like, mask_codes, place
 
 log = logging.getLogger(__name__)
 
@@ -165,7 +165,10 @@ def _first(placed):
     # combine_first aligns and fills, which promotes an integer coordinate to float and a
     # string one to object. Every burst carries the same ones, so put them back as they were.
     kept = {name: placed[0][name] for name in placed[0].coords if name not in combined.dims}
-    return _keep_attrs(combined.assign_coords(kept), placed[0])
+    # combine_first fills too, and a filled mask is a float one. This is the default for
+    # complex data, so every CSLC mosaic carried two nodata representations at once.
+    combined = mask_codes(combined.assign_coords(kept))
+    return _keep_attrs(combined, placed[0])
 
 
 def _keep_attrs(combined, reference):

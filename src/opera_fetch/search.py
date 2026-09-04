@@ -11,7 +11,7 @@ import pandas as pd
 
 from opera_fetch import constants as const
 from opera_fetch import filenames
-from opera_fetch.aoi import as_geometry
+from opera_fetch.aoi import as_geometry, one_polygon
 
 log = logging.getLogger(__name__)
 
@@ -65,7 +65,7 @@ def search(aoi=None, start=None, end=None, product=const.RTC, burst_id=None, tra
     # Built up rather than passed whole: ASF treats a None as a filter on nothing.
     query = {"dataset": asf.DATASET.OPERA_S1, "processingLevel": product}
     if aoi is not None:
-        query["intersectsWith"] = as_geometry(aoi).wkt
+        query["intersectsWith"] = one_polygon(as_geometry(aoi)).wkt
     if burst_id is not None:
         # ASF wants T049_103327_IW3; the hyphenated form in every filename returns nothing.
         query["operaBurstID"] = [str(b).replace("-", "_").upper() for b in _listed(burst_id)]
@@ -135,6 +135,21 @@ def data_urls(frame, layers=None):
     if not wanted:
         raise ValueError(f"no {product} URLs matched layers {tuple(layers)}")
     return sorted(wanted)
+
+
+def file_sizes(frame, layers=None):
+    """The size ASF declares for each file in a search result, as {filename: bytes}.
+
+    ``download`` reads it to tell a finished file from one an interrupted transfer left
+    the right shape but the wrong length.
+    """
+    if frame.empty:
+        return {}
+    product = _one(frame, "product")
+    layers = const.DEFAULT_LAYERS[product] if layers is None else layers
+    return {url.rsplit("/", 1)[-1]: (sizes or {}).get(url.rsplit("/", 1)[-1], 0)
+            for urls, sizes in zip(frame["urls"], frame["sizes"], strict=True)
+            for url in urls if _is_data(url.rsplit("/", 1)[-1], product, layers)}
 
 
 def _is_data(name, product, layers):
