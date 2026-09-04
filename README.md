@@ -78,11 +78,20 @@ that forces a second.
 {32612: <xarray.Dataset>, 32613: <xarray.Dataset>}
 ```
 
-**sinc reproject for complex, nearest for real.** The kernel follows what a layer holds.
-Real layers and the mask move by nearest, which invents nothing, and a class code has no
-average anyway: shadow and both would come out layover. Complex is sinc interpolated
-instead, since any kernel costs it coherence. That keeps 0.996 against the analytic answer
-where lanczos alone keeps 0.951.
+**Sinc reproject for complex, nearest for real.** The kernel follows what a layer holds.
+Real layers and the mask move by nearest. This means that reprojected real layers (RTC amplitude)
+will not be exactly from their grid locations since they are the nearest points in a 30m grid.
+Complex is sinc interpolated instead, since any kernel costs it coherence.
+
+Pass `resampling=` to put the real layers where they belong instead. It takes any name from
+`rasterio.enums.Resampling`, and the mask and the complex layers ignore it.
+
+```python
+stack = of.fetch_stacks(aoi, start, end, reproject_to="auto", resampling="bilinear")
+```
+
+`bilinear` places a value correctly and costs 42% of the variance. `cubic` and `lanczos`
+have negative lobes and produce negative gamma0, which a power ratio cannot be.
 
 **What comes back is xarray, and nothing else.** A `Dataset` per zone, dimensions
 `(time, y, x)`, one layer per variable, dask-backed so a season is not read until it is
@@ -119,24 +128,18 @@ stack = of.fetch_stacks(aoi, start, end, reproject_to="EPSG:32613")    # if you 
 is nearest the middle of the AOI. Data already in that zone keeps the grid OPERA delivered
 and only the other zones move. With one zone, the usual case, `"auto"` resamples nothing.
 
-`resampling=` overrides the default kernel for the real layers with any name from
-`rasterio.enums.Resampling`. The mask and the complex layers ignore it, for the reasons
-above. Eight is where the oversampling curve flattens: sixteen buys 0.003 more coherence
-for four times the memory.
+**How far nearest actually moves a value.** Neighbouring UTM lattices do not line up.
+Putting the East River zone 12 grid into zone 13 leaves every pixel centre a median 12 m,
+and up to 21 m, from the nearest source centre on a 30 m grid, as a rotation and a slight
+scale change rather than a shift. So nearest returns a real observed gamma0 with its speckle
+statistics intact and attributes it to a cell up to two thirds of a pixel away. It is the
+default because it invents nothing, not because the error is small.
 
-**Nearest for real layers is a trade, not a clear win.** Neighbouring UTM lattices do not
-line up. Putting the East River zone 12 grid into zone 13 leaves every pixel centre a median
-12 m, and up to 21 m, from the nearest source centre on a 30 m grid, as a rotation and a
-slight scale change rather than a shift. Nearest returns a real observed gamma0 with its
-speckle statistics intact and attributes it to a cell up to two thirds of a pixel away;
-bilinear puts it in the right place and removes 42% of the variance. Nearest is the default
-because it invents nothing, not because the error is small.
-
-Two things before overriding it. `cubic` and `lanczos` have negative lobes and produce
-negative gamma0, 0.12% and 0.35% of cells on that scene, and gamma0 is a power ratio, so
-`10*log10` gives NaN there. And the oversampling used for CSLC does not transfer: gamma0 is
-detected rather than complex, so it is not bandlimited to its own grid and zero padding its
-spectrum also gives negatives.
+`cubic` and `lanczos` produce negative gamma0 on 0.12% and 0.35% of cells on that scene,
+where `10*log10` is then NaN. The oversampling used for CSLC does not transfer either:
+gamma0 is detected rather than complex, so it is not bandlimited to its own grid and zero
+padding its spectrum also gives negatives. Eight is where that curve flattens for CSLC;
+sixteen buys 0.003 more coherence for four times the memory.
 
 Where bursts carry `number_of_looks` they are averaged in proportion to it, so a cell only
 one burst reaches still goes through the weighted average, and `(w * x) / w` is not always
