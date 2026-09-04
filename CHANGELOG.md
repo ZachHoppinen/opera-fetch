@@ -1,12 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.2.2
 
-Found by reading the same granules with sarvalanche, which implements the OPERA RTC read
-independently: it reprojects every granule onto a reference grid and stacks the files
-where this package mosaics onto the grid OPERA delivered. Put on the same grid, the two
-agree bit for bit on the values, on every mask code, and on the mean over an overlap. They
-disagreed about the looks.
+Found by reading the same granules with two packages that share no code with this one.
+sarvalanche reprojects every granule onto a reference grid and stacks the files; spicy_snow
+does the same and takes an acquisition's instant and its track out of the filename where
+this package reads the tags. Put on one grid over a real four-track cache, all three agree
+bit for bit on the backscatter, on every mask code, on which cells are clear ground, and
+on the mean over a three-burst overlap. Two disagreements came out of it, one a bug here.
 
 - A burst counts its looks towards a mosaicked pixel only where it observed something. A
   burst's static layers span its whole footprint while the acquisition carries nodata over
@@ -19,6 +20,16 @@ disagreed about the looks.
   a cell reached by one burst still goes through the weighted average, where `(w * x) / w`
   loses a last bit in float32 about a tenth of the time: a relative 2e-7, measured. No
   value moves and nothing is interpolated; it is the arithmetic of averaging one number.
+- `align_passes` said times closer than the tolerance become one pass. Each acquisition
+  joins the pass before it when it falls within the tolerance of the one *before it*, so
+  five acquisitions nine minutes apart are one pass thirty-six minutes long. That is what
+  a pass is, since a track is acquired as a continuous sweep whose ends can be further
+  apart than any tolerance worth setting, so the docstring is what changed. It now also
+  says the cost: a tolerance set too wide chains rather than rounding the edges.
+
+Nothing here changes an interface. A stack's `number_of_looks` will read lower than it did
+wherever bursts overlap, which is the correction; anything using backscatter alone is
+unaffected.
 
 ## 0.2.1
 
