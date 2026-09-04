@@ -78,14 +78,11 @@ that forces a second.
 {32612: <xarray.Dataset>, 32613: <xarray.Dataset>}
 ```
 
-**sinc reproject for complex, nearest for real.** Where the package does resample, the kernel is
-chosen by what a layer is rather than set once for the whole stack. A mask is a class code,
-so it moves by nearest; interpolated with its neighbours, shadow and both average to
-layover, a class nobody observed. A real layer takes nearest too by default, which invents
-nothing. A complex layer takes neither: it is sinc interpolated, oversampled eight times
-over by zero padding its spectrum and read at the nearest fine sample, which is the only
-way to move one without giving up coherence. Measured against the analytic answer on real
-CSLC, that keeps 0.996 where resampling directly with lanczos keeps 0.951.
+**sinc reproject for complex, nearest for real.** The kernel follows what a layer holds.
+Real layers and the mask move by nearest, which invents nothing, and a class code has no
+average anyway: shadow and both would come out layover. Complex is sinc interpolated
+instead, since any kernel costs it coherence. That keeps 0.996 against the analytic answer
+where lanczos alone keeps 0.951.
 
 **What comes back is xarray, and nothing else.** A `Dataset` per zone, dimensions
 `(time, y, x)`, one layer per variable, dask-backed so a season is not read until it is
