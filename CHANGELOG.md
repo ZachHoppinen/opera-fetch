@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+- Every static layer says what it is. Only the incidence angles were described; the others
+  kept the GeoTIFF's own tags, all 69 of them, so `number_of_looks` carried OPERA's
+  processing software version and the date it ran, and a `_FillValue` a reader turns back
+  into a gap. They now get units and a name like every other layer, and the static mask
+  gets its `flag_meanings` too.
+
+### Tests
+
+The golden digests now record what each layer holds, not only a hash of it: the observed
+and empty counts, the minimum, the first and ninety-ninth percentiles, the median, the
+mean, the maximum and the standard deviation, to six significant figures. A hash says a
+layer changed and nothing about how. These say what is in it, so the file can be read and
+judged: gamma0 a linear power around 0.1, a local incidence angle around 0.77 radians,
+a look count in the tens.
+
+Two of the digests are built from real OPERA granules rather than synthetic ones, marked
+`data` so they skip where the cache is absent and CI never sees them. They are what would
+catch a unit lost at ingest, and they assert the physics before they trust the record:
+gamma0 is a power ratio and not decibels, Sentinel-1 IW looks down at 30 to 45 degrees,
+the mask holds only the codes OPERA defines.
+
 ## 0.2.2
 
 Found by reading the same granules with two packages that share no code with this one.

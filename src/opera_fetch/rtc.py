@@ -161,8 +161,26 @@ def _add_static(stack, paths, chunks):
         if layer.endswith("incidence_angle"):
             # Radians at ingest, so everything downstream shares one unit system.
             placed = np.deg2rad(placed)
-            placed.attrs = {"units": "radians", "long_name": layer.replace("_", " ")}
+        # Every static layer gets described, not only the angles. Left with what the
+        # GeoTIFF carried, the others kept all 69 of its tags: the processing software's
+        # version and the date it ran, on a layer of numbers, and a _FillValue among them
+        # that a reader turns back into a gap.
+        placed.attrs = _layer_attrs(layer)
         # The static mask is the same field as the per-acquisition one, so it needs its
         # own name to sit beside it.
         stack["static_mask" if layer == "mask" else layer] = placed
     return stack
+
+
+def _layer_attrs(layer):
+    """What a static layer is, in the same shape the backscatter and the mask get."""
+    if layer.endswith("incidence_angle"):
+        return {"units": "radians", "long_name": layer.replace("_", " ")}
+    if layer == "mask":
+        return {"units": "1", "long_name": "layover and shadow mask, from the static layer",
+                "flag_meanings": f"{const.MASK_MEANINGS}, "
+                                 f"{const.MASK_NODATA[const.RTC]} no observation"}
+    if layer == const.LOOKS:
+        return {"units": "1", "long_name": "number of looks"}
+    # The two area normalization factors, which are ratios like the backscatter itself.
+    return {"units": "1", "long_name": layer.replace("_", " ")}

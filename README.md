@@ -67,13 +67,6 @@ pixel centres exactly. Mosaicking and clipping are coordinate lookups, so every 
 comes out is a value that went in. Reprojecting is left to whatever comes next, which is
 the step that knows what it wants.
 
-Where bursts carry `number_of_looks`, a cell only one burst reaches still goes through the
-weighted average, and `(w * x) / w` is not always `x` in float32: about a tenth of such
-cells come back within one unit in the last place, a relative 2e-7. Nothing is interpolated
-and no value moves; the arithmetic of averaging one number is where that last bit goes.
-
-The lattice is taken from the OPERA products themselves.
-
 ### Returning a dictionary is how we avoid reprojections
 
 OPERA assigns the UTM zone **per burst**, so an AOI near a zone boundary can be covered by
@@ -133,6 +126,8 @@ its spectrum also gives negatives.
 **A complex layer is sinc interpolated**, the same family OPERA geocodes complex data with.
 It happens in two steps rather than through a kernel. The layer is oversampled eight times over by zero padding its
 spectrum and the fine sample is then read directly.
+
+**The lattice is taken from the OPERA products themselves.** We return on a UTM grid using the opera design.
 
 ### What it refuses
 

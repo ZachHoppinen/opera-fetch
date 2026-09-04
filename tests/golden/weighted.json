@@ -66,12 +66,16 @@
         "x"
       ],
       "dtype": "float32",
+      "empty": 0,
       "hash": "ddb5f19dd234808d",
+      "max": 0.390779,
+      "mean": 0.285769,
+      "median": 0.286932,
+      "min": 0.183085,
       "observed": 180,
-      "range": [
-        0.1831,
-        0.3908
-      ]
+      "p01": 0.18483,
+      "p99": 0.387655,
+      "std": 0.0604047
     },
     "mask": {
       "attrs": {
@@ -96,29 +100,24 @@
     },
     "number_of_looks": {
       "attrs": {
-        "ABSOLUTE_ORBIT_NUMBER": 0,
-        "AREA_OR_POINT": "Area",
-        "BOUNDING_POLYGON": "POLYGON ((-108.0002762 39.0972191, -107.9961188 39.0971119, -107.9960042 39.0998116, -108.0001617 39.0999187, -108.0002762 39.0972191))",
-        "BURST_ID": "T049-103327-IW3",
-        "ORBIT_PASS_DIRECTION": "ASCENDING",
-        "PLATFORM": "Sentinel-1A",
-        "PRODUCT_VERSION": 1.0,
-        "TRACK_NUMBER": 49,
-        "ZERO_DOPPLER_START_TIME": "2014-04-03T00:00:00Z",
-        "add_offset": 0.0,
-        "scale_factor": 1.0
+        "long_name": "number of looks",
+        "units": "1"
       },
       "dims": [
         "y",
         "x"
       ],
       "dtype": "float32",
+      "empty": 0,
       "hash": "9b6f28500acbda80",
+      "max": 5.0,
+      "mean": 2.33333,
+      "median": 1.0,
+      "min": 1.0,
       "observed": 180,
-      "range": [
-        1.0,
-        5.0
-      ]
+      "p01": 1.0,
+      "p99": 5.0,
+      "std": 1.88562
     },
     "vv": {
       "attrs": {
@@ -131,12 +130,16 @@
         "x"
       ],
       "dtype": "float32",
+      "empty": 0,
       "hash": "0efee29c84151318",
+      "max": 119329.0,
+      "mean": 113328.0,
+      "median": 113328.0,
+      "min": 107327.0,
       "observed": 360,
-      "range": [
-        107327.0,
-        119328.6094
-      ]
+      "p01": 107327.0,
+      "p99": 119329.0,
+      "std": 6000.0
     }
   }
 }

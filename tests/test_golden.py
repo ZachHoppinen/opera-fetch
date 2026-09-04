@@ -28,6 +28,33 @@ from tests.granules import write_granule, write_static
 from opera_fetch.grid import bounds_of, spacing_of
 from opera_fetch.stack import assemble
 
+# Real granules, for the digests that hold real numbers. The same cache the tests marked
+# ``data`` read, named burst by burst so the digest does not move when the cache grows.
+REAL = Path(os.environ.get("OPERA_FETCH_TEST_RTC", "data/raw/east_river"))
+REAL_CASES = {
+    # One burst whose 2024-11-21 acquisition was processed twice, so the digest is also
+    # the record of which processing won.
+    "real_one_burst": ["OPERA_L2_RTC-S1_T049-103327-IW3_2024*"],
+    # Three bursts of one pass, seconds apart, two of them overlapping: the mosaic, the
+    # weighted average and the look count, on ground rather than on arithmetic.
+    "real_one_pass": ["OPERA_L2_RTC-S1_T056-118980-IW2_20241109*",
+                      "OPERA_L2_RTC-S1_T056-118980-IW3_20241109*",
+                      "OPERA_L2_RTC-S1_T056-118981-IW2_20241109*"],
+}
+
+
+def real_files(case):
+    """The granules of one real case, with their static layers, or a skip."""
+    if not REAL.exists():
+        pytest.skip(f"no OPERA granules at {REAL}")
+    paths = [p for pattern in REAL_CASES[case] for p in REAL.glob(f"{pattern}.tif")]
+    bursts = {p.name.split("_")[3] for p in paths}
+    statics = [p for burst in bursts
+               for p in REAL.glob(f"OPERA_L2_RTC-S1-STATIC_{burst}_*.tif")]
+    if not paths:
+        pytest.skip(f"{case} needs granules that are not in {REAL}")
+    return sorted(str(p) for p in paths + statics)
+
 GOLDEN = Path(__file__).parent / "golden"
 
 # Written afresh every run, so they can never agree.
@@ -64,20 +91,54 @@ def digest(stack, exact):
         entry = {"dims": list(array.dims), "dtype": str(values.dtype),
                  "attrs": {k: _plain(v) for k, v in sorted(array.attrs.items())}}
         if values.dtype.kind in "iu":
-            # A class code has no range worth recording, and how many cells hold each code
-            # is what says whether something filled or interpolated one.
+            # A class code has no distribution worth recording, and how many cells hold
+            # each code is what says whether something filled or interpolated one.
             codes, counts = np.unique(values, return_counts=True)
             entry["codes"] = {str(code): int(count)
                               for code, count in zip(codes, counts, strict=True)}
         else:
-            finite = values[np.isfinite(values)]
-            entry["observed"] = int(finite.size)
-            entry["range"] = ([round(float(finite.min()), 4), round(float(finite.max()), 4)]
-                              if finite.size else None)
+            entry.update(_numbers(values))
         if exact:
             entry["hash"] = _hash(values)
         found["variables"][name] = entry
     return found
+
+
+def _numbers(values):
+    """What a layer actually holds, in numbers a reader can judge.
+
+    A hash says a layer changed and nothing about how. These say what is in it, so a
+    golden file can be read: gamma0 is a linear power around 0.1, an incidence angle in
+    radians runs to about 1.4, and a look count is a small positive integer. A wrong unit,
+    a lost conversion or a shifted distribution shows up here as a number somebody can
+    recognise as wrong, where the hash only says something moved.
+    """
+    finite = values[np.isfinite(values)].astype("float64")
+    if not finite.size:
+        return {"observed": 0}
+    if np.iscomplexobj(finite):
+        finite = np.abs(finite)
+    low, high = np.percentile(finite, [1, 99])
+    return {
+        "observed": int(finite.size),
+        "empty": int(values.size - finite.size),
+        "min": _figures(finite.min()),
+        "p01": _figures(low),
+        "median": _figures(np.median(finite)),
+        "mean": _figures(finite.mean()),
+        "p99": _figures(high),
+        "max": _figures(finite.max()),
+        "std": _figures(finite.std()),
+    }
+
+
+def _figures(value, digits=6):
+    """A number to six significant figures, which is finer than any real change and
+    coarser than the last bits of a float32 sum."""
+    value = float(value)
+    if value == 0 or not np.isfinite(value):
+        return value if np.isfinite(value) else "nan"
+    return float(f"%.{digits}g" % value)
 
 
 def _hash(values):
@@ -382,3 +443,46 @@ def test_netcdf_cannot_hold_a_one_element_list(tmp_path):
     two.to_netcdf(tmp_path / "two.nc", engine="h5netcdf")
     assert list(xr.open_dataset(tmp_path / "two.nc",
                                 engine="h5netcdf").attrs["tracks"]) == [49, 56]
+
+
+@pytest.mark.data
+@pytest.mark.parametrize("case", sorted(REAL_CASES))
+def test_real_granules_still_give_the_numbers_they_gave(case):
+    """The digests above are built from granules written to be convenient. These are ASF's
+    own, so the numbers in them are the ones a reader can judge: gamma0 a linear power
+    well under one, an incidence angle in radians up to about 1.4, a look count in the
+    tens, and only the four mask codes OPERA defines plus its no-observation value.
+
+    Skipped where the cache is not on this machine, so CI never sees them. They are the
+    ones that would catch a unit lost at ingest, which no synthetic granule can.
+    """
+    stack = assemble(real_files(case))
+    assert len(stack) == 1, "each case is one zone"
+    stack = next(iter(stack.values()))
+
+    found = digest(stack, exact=True)
+    numbers = found["variables"]
+
+    # Judged before the digest is trusted, so a wrong file cannot quietly become the
+    # record. These are what the layers mean, not what they happen to hold today.
+    for polarization in ("vv", "vh"):
+        gamma0 = numbers[polarization]
+        assert gamma0["attrs"]["units"] == "1"
+        assert 0.001 < gamma0["median"] < 1, \
+            f"{polarization} is a linear power ratio; in decibels it would be negative"
+
+    angle = numbers["local_incidence_angle"]
+    assert angle["attrs"]["units"] == "radians"
+    assert np.deg2rad(20) < angle["median"] < np.deg2rad(60), \
+        "Sentinel-1 IW looks down at about 30 to 45 degrees"
+    # Past 90 degrees on ground that faces away from the radar, which is where the mask
+    # says shadow. Past 180 would mean the layer is not an angle in radians.
+    assert 0 <= angle["min"] and angle["max"] < np.pi
+
+    looks = numbers["number_of_looks"]
+    assert 1 < looks["median"] < 500, "a look count, not a fraction and not a sum gone wild"
+
+    assert set(numbers["mask"]["codes"]) <= {"0", "1", "2", "3", "255"}, \
+        "only the codes OPERA defines, and its no-observation value"
+
+    compare(case, found)
