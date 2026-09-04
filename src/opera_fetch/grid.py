@@ -52,6 +52,18 @@ def spacing_of(obj):
     return (float(abs(obj.x[1] - obj.x[0])), float(abs(obj.y[1] - obj.y[0])))
 
 
+def measured_spacing(obj):
+    """The posting read off the coordinates, or None where there is nothing to read.
+
+    For updating a stale ``spacing`` attribute after something has re-gridded an object.
+    ``spacing_of`` deliberately trusts the attribute, so whatever moves a grid has to say
+    so; every footprint in the package is worked out from that number.
+    """
+    if obj.sizes.get("x", 0) < 2 or obj.sizes.get("y", 0) < 2:
+        return None
+    return (float(abs(obj.x[1] - obj.x[0])), float(abs(obj.y[1] - obj.y[0])))
+
+
 def bounds_of(obj):
     """The outer pixel edges of a grid, as (west, south, east, north).
 

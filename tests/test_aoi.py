@@ -78,3 +78,28 @@ def test_a_geometry_that_wrapped_the_long_way_is_caught_too():
 def test_an_aoi_with_no_area_is_refused():
     with pytest.raises(ValueError, match="no area"):
         as_geometry([(0, 0), (1, 1), (2, 2)])
+
+
+@pytest.mark.parametrize(("box", "says"), [
+    ((38.88, -107.0, 38.95, -106.92), "latitude -107"),
+    ((-107.0, 120.0, -106.9, 130.0), "latitude 120"),
+    ((400.0, 38.0, 401.0, 39.0), "longitude 400"),
+    ((326_500, 4_302_000, 339_000, 4_312_000), "aoi_crs"),
+])
+def test_coordinates_that_are_not_lon_lat_are_refused(box, says):
+    """ASF clamps a latitude past 90 rather than complaining, degenerates the polygon and
+    returns nothing, and the archive gets blamed for a transposed pair."""
+    with pytest.raises(ValueError, match=says):
+        as_geometry(box)
+
+
+def test_a_box_with_south_above_north_is_refused():
+    """shapely.box quietly swaps them, so it would come out valid somewhere else."""
+    with pytest.raises(ValueError, match=r"south 39\.0 is north of north 38\.0"):
+        as_geometry((-107.0, 39.0, -106.9, 38.0))
+
+
+def test_a_projected_box_with_its_crs_is_still_ordinary():
+    """The range check is about coordinates read as lon/lat, not about projected ones."""
+    geometry = as_geometry((326_500, 4_302_000, 339_000, 4_312_000), "EPSG:32613")
+    assert -108 < geometry.bounds[0] < -106

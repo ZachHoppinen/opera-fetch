@@ -45,6 +45,8 @@ def as_geometry(aoi, crs=None):
     if geometry.is_empty or geometry.area == 0:
         raise ValueError("AOI has no area")
 
+    _in_range(geometry, native is None and crs == WGS84)
+
     # A box across 180 comes out as its complement: the whole world but the box. Silently
     # searching the globe is worse than refusing, and splitting it is the caller's call
     # because the two halves land in different UTM zones and cannot share a grid anyway.
@@ -56,6 +58,28 @@ def as_geometry(aoi, crs=None):
             "each side: they fall in different UTM zones and cannot share one grid.")
 
     return geometry
+
+
+def _in_range(geometry, assumed_lonlat):
+    """Refuse coordinates that are not lon/lat, having been read as lon/lat.
+
+    ASF clamps a latitude past 90 rather than complaining, which degenerates the polygon
+    and returns nothing: the archive gets blamed for a transposed pair or a forgotten
+    aoi_crs. The message says which value is wrong, and what it probably was.
+    """
+    west, south, east, north = geometry.bounds
+    bad = ([f"longitude {value:g}" for value in (west, east) if abs(value) > 180]
+           + [f"latitude {value:g}" for value in (south, north) if abs(value) > 90])
+    if not bad:
+        return
+
+    hint = ""
+    if assumed_lonlat and abs(south) <= 180 and abs(north) <= 180 and abs(west) <= 90:
+        hint = (". These look like (south, west, north, east): a box is "
+                "(west, south, east, north)")
+    elif assumed_lonlat and max(abs(west), abs(east), abs(south), abs(north)) > 1000:
+        hint = ". These look like projected metres, so pass aoi_crs with the zone they are in"
+    raise ValueError(f"AOI is not in lon/lat: {', '.join(bad)}{hint}")
 
 
 def _to_shapely(aoi):
@@ -89,11 +113,17 @@ def _to_shapely(aoi):
 
     if isinstance(aoi, (list, tuple)):
         if len(aoi) == 4 and all(isinstance(value, (int, float)) for value in aoi):
-            west, east = aoi[0], aoi[2]
+            west, south, east, north = aoi
             if west > east:
                 raise ValueError(
                     f"west {west} is east of east {east}, so this box crosses the "
                     "antimeridian. Split it at 180 and assemble each side separately.")
+            # shapely.box quietly swaps these, so a transposed pair would come out as a
+            # valid box somewhere the caller never asked about.
+            if south > north:
+                raise ValueError(
+                    f"south {south} is north of north {north}. A box is "
+                    "(west, south, east, north).")
             return shapely.geometry.box(*aoi), None
         if len(aoi) >= 3 and all(hasattr(pair, "__len__") and len(pair) == 2 for pair in aoi):
             return shapely.geometry.Polygon(aoi), None

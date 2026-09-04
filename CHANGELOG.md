@@ -38,6 +38,23 @@ answer.
   the mask returns as float with NaN where the class code was.
 - The mask-code convention is one function, `grid.mask_codes`, rather than a loop repeated
   wherever something fills.
+- The `spacing` attribute follows the grid it describes. Reprojecting left it at 30 on a
+  degree grid, and `bounds_of` reads it rather than the coordinates, so a stack on
+  EPSG:4326 reported a footprint 30 degrees square. `clip`, `grid_like` and the validation
+  coverage check all go through `bounds_of`.
+- A once-per-burst layer stays `(y, x)` through the reprojection path where the zones
+  agree on it, instead of being broadcast along time. A real incidence angle was 42 times
+  the bytes and a shape nothing positional expects.
+- Concatenating passes takes the variables the passes have rather than the first pass's. A
+  cache that grew one track at a time holds static layers for one track and not the other,
+  and that raised a bare `KeyError`. What is missing from a pass is named in a warning.
+- A pass is empty only when every acquisition of it is. Read from the first acquisition
+  alone, a pass whose first date happened to be blank was dropped with all 41 acquisitions
+  behind it, and then the AOI was blamed for covering nothing.
+- An AOI whose coordinates are not lon/lat is refused rather than sent to ASF, which clamps
+  a latitude past 90, degenerates the polygon and returns nothing. A transposed pair and a
+  forgotten `aoi_crs` each get told what they look like. A box with south above north is
+  refused too, where `shapely.box` quietly swapped them.
 
 ## 0.1.0
 

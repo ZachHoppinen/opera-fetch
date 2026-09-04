@@ -86,6 +86,18 @@ def test_a_utm_box_can_be_given_as_the_aoi_in_that_zone():
     assert all(abs(a - b) < 30 for a, b in zip(box, back, strict=True))
 
 
+# The same ground in two zones, near the 12/13 boundary at -108. Given the same easting in
+# both zones instead, the two patches sit 520 km apart: nothing of the moved zone lands on
+# the reference grid, and every assertion about a moved value is really about the fill.
+ZONE12 = {"epsg": 32612, "west": 759_420, "north": 4_332_150}
+ZONE13 = {"epsg": 32613, "west": 240_570, "north": 4_332_150}
+
+
+def _two_zones(**kwargs):
+    """One burst in each zone, over the same ground."""
+    return make_burst(**ZONE12, **kwargs), make_burst(**ZONE13, **kwargs)
+
+
 def _zone_bursts():
     """Two tracks in one zone, and one in another: what a boundary AOI looks like."""
     a = make_burst(west=500_010, north=4_332_210, track=49, direction="ASCENDING")
@@ -133,8 +145,7 @@ def test_reproject_to_gives_one_dataset_and_says_so(caplog):
 
     from opera_fetch.stack import _onto_one_crs
 
-    a = make_burst(west=500_010, north=4_332_210, epsg=32612)
-    b = make_burst(west=500_010, north=4_332_210, epsg=32613)
+    a, b = _two_zones()
     for stack, track in ((a, 49), (b, 56)):
         stack.coords["track"] = ("time", [track] * stack.sizes["time"])
 
@@ -151,8 +162,7 @@ def test_reprojection_does_not_invent_a_mask_code():
     """Untold which code is nodata, GDAL rewrote 255 to 254, which OPERA does not define."""
     from opera_fetch.stack import _onto_one_crs
 
-    a = make_burst(west=500_010, north=4_332_210, epsg=32612)
-    b = make_burst(west=500_010, north=4_332_210, epsg=32613)
+    a, b = _two_zones()
     a["mask"][:] = 255
 
     joined = _onto_one_crs({32612: a, 32613: b}, "EPSG:32613")
@@ -161,8 +171,7 @@ def test_reprojection_does_not_invent_a_mask_code():
 
 
 def _complex_zones():
-    a = make_burst(west=500_010, north=4_332_210, epsg=32612)
-    b = make_burst(west=500_010, north=4_332_210, epsg=32613)
+    a, b = _two_zones()
     for stack, track in ((a, 49), (b, 56)):
         values = (stack.vv.values + 1j).astype("complex64")
         stack["vv"] = (stack.vv.dims, values)
@@ -234,8 +243,7 @@ def test_the_mask_moves_by_nearest_whatever_the_data_does():
     """A class code interpolated with its neighbours is a code nobody observed."""
     from opera_fetch.stack import _onto_one_crs
 
-    a = make_burst(west=500_010, north=4_332_210, epsg=32612)
-    b = make_burst(west=500_010, north=4_332_210, epsg=32613)
+    a, b = _two_zones()
     a["mask"][:] = 2
     b["mask"][:] = 0
 
@@ -330,8 +338,8 @@ def test_a_zone_already_in_the_target_crs_is_not_resampled():
     result stays on a lattice OPERA delivered rather than one derived from another zone."""
     from opera_fetch.stack import _onto_one_crs
 
-    quiet = make_burst(west=500_010, north=4_332_210, epsg=32612, times=2)
-    busy = make_burst(west=500_010, north=4_332_210, epsg=32613, times=4)
+    quiet = make_burst(**ZONE12, times=2)
+    busy = make_burst(**ZONE13, times=4)
     for stack, track in ((quiet, 49), (busy, 56)):
         stack.coords["track"] = ("time", [track] * stack.sizes["time"])
 
@@ -346,8 +354,7 @@ def test_a_crs_no_zone_is_in_says_everything_moves(caplog):
 
     from opera_fetch.stack import _onto_one_crs
 
-    a = make_burst(west=500_010, north=4_332_210, epsg=32612)
-    b = make_burst(west=500_010, north=4_332_210, epsg=32613)
+    a, b = _two_zones()
     for stack, track in ((a, 49), (b, 56)):
         stack.coords["track"] = ("time", [track] * stack.sizes["time"])
 
@@ -431,8 +438,7 @@ def test_auto_without_an_aoi_is_still_repeatable():
     """reproject_to works without an AOI, and then there is no geography to appeal to."""
     from opera_fetch.stack import _best_zone
 
-    a = make_burst(west=500_010, north=4_332_210, epsg=32612)
-    b = make_burst(west=500_010, north=4_332_210, epsg=32613)
+    a, b = _two_zones()
     assert _best_zone({32612: a, 32613: b}) == 32612
     assert _best_zone({32613: b, 32612: a}) == 32612
 
@@ -441,8 +447,8 @@ def test_auto_leaves_the_chosen_zone_on_operas_own_grid():
     """The point of choosing a zone at all is that its data then never moves."""
     from opera_fetch.stack import _best_zone, _onto_one_crs
 
-    winner = make_burst(west=500_010, north=4_332_210, epsg=32613)
-    other = make_burst(west=500_010, north=4_332_210, epsg=32612)
+    winner = make_burst(**ZONE13)
+    other = make_burst(**ZONE12)
 
     zones = {32612: other, 32613: winner}
     joined = _onto_one_crs(zones, f"EPSG:{_best_zone(zones, _aoi_in_zone_13())}")
@@ -458,7 +464,7 @@ def test_auto_on_a_single_zone_resamples_nothing(caplog):
 
     from opera_fetch.stack import _best_zone, _onto_one_crs
 
-    only = {32612: make_burst(west=500_010, north=4_332_210, epsg=32612)}
+    only = {32612: make_burst(**ZONE12)}
     with caplog.at_level(logging.WARNING, logger="opera_fetch.stack"):
         joined = _onto_one_crs(only, f"EPSG:{_best_zone(only, _aoi_in_zone_13())}")
 
@@ -470,8 +476,8 @@ def _zone(epsg, track, direction, granule, hours=0):
     """One zone as assemble builds it: a pass, mosaicked, stamped and concatenated."""
     from opera_fetch.mosaic import mosaic
 
-    burst = make_burst(west=500_010, north=4_332_210, epsg=epsg, track=track,
-                       direction=direction)
+    place = ZONE12 if epsg == 32612 else ZONE13
+    burst = make_burst(**place, track=track, direction=direction)
     burst = burst.assign_coords(time=burst.indexes["time"] + pd.Timedelta(hours=hours))
     burst.attrs.update(granules=granule, burst_id=f"T{track:03d}-103327-IW3")
     return _one_zone([_stamped(mosaic([burst]), track, direction)], epsg)
@@ -559,3 +565,58 @@ def test_a_static_layer_from_another_burst_is_refused():
     with pytest.raises(Exception) as caught:
         read_burst([RTC, STATIC])
     assert "span" not in str(caught.value)
+
+
+def test_a_static_layer_is_not_broadcast_along_time():
+    """A once-per-burst layer that every pass agrees on stays (y, x). Broadcast, a real
+    incidence angle is 42 times the bytes and a shape nothing positional expects."""
+    from opera_fetch.stack import _onto_one_crs
+
+    only = {32612: make_burst(**ZONE12)}
+    joined = _onto_one_crs(only, "EPSG:32612")
+
+    angle = joined["local_incidence_angle"]
+    assert angle.dims == ("y", "x")
+    assert np.array_equal(angle.values, only[32612]["local_incidence_angle"].values)
+
+
+def test_a_zone_takes_the_passes_it_has_rather_than_the_first_ones(caplog):
+    """A cache that grew one track at a time holds statics for one track and not the
+    other. Reading the variable list off the first pass raised a bare KeyError."""
+    import logging
+
+    a = _zone(32612, 49, "ASCENDING", "OPERA_L2_RTC-S1_T049-103327-IW3_A")
+    b = _zone(32612, 129, "ASCENDING", "OPERA_L2_RTC-S1_T129-103327-IW3_B", hours=6)
+    b = b.drop_vars("local_incidence_angle")
+
+    with caplog.at_level(logging.WARNING, logger="opera_fetch.stack"):
+        zone = _one_zone([a, b], 32612)
+
+    assert zone.sizes["time"] == a.sizes["time"] + b.sizes["time"]
+    assert "local_incidence_angle" in zone.data_vars
+    assert "local_incidence_angle" in caplog.text, "and it says which pass was short"
+
+
+def test_the_spacing_attribute_follows_the_grid_it_describes():
+    """Every footprint in the package is worked out from the attribute, not from the
+    coordinates. Left at 30 on a degree grid, bounds_of answered 30 degrees square."""
+    from opera_fetch.grid import bounds_of
+    from opera_fetch.stack import _onto_one_crs
+
+    joined = _onto_one_crs({32612: make_burst(**ZONE12)}, "EPSG:4326")
+
+    assert joined.attrs["spacing"][0] < 0.001, "degrees, not metres"
+    assert bounds_of(joined) == pytest.approx(joined.rio.bounds(), abs=1e-9)
+
+
+def test_a_pass_is_empty_only_when_every_acquisition_of_it_is():
+    """mosaic outer-joins the times it is given, so an empty first date with a season
+    behind it is a case mosaic itself anticipates. Dropping the pass then blames the AOI."""
+    from opera_fetch.stack import _has_data
+
+    stack = make_burst(**ZONE12, times=4)
+    stack["vv"][0] = np.nan
+    assert _has_data(stack), "41 acquisitions were dropped on the strength of the first"
+
+    stack["vv"][:] = np.nan
+    assert not _has_data(stack)

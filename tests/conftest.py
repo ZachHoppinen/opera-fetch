@@ -79,20 +79,33 @@ def cslc_paths():
 
 
 def make_burst(west, north, columns=8, rows=6, times=2, track=49, direction="ASCENDING",
-               spacing=(30.0, 30.0), epsg=32612, fill=1.0):
+               spacing=(30.0, 30.0), epsg=32612, fill=None, static=True):
+    """A synthetic burst.
+
+    fill defaults to a value per cell rather than one constant, so a test that says a value
+    did not move is testing that and not the fill: a constant survives being shifted,
+    transposed, or replaced by any other constant. Pass a number for a flat burst where the
+    arithmetic is the point.
+
+    static adds a once-per-burst (y, x) layer, which is the shape the static layers arrive
+    in and the one nothing else in the fixtures has.
+    """
     dx, dy = (spacing, spacing) if isinstance(spacing, (int, float)) else spacing
     x = west + (np.arange(columns) + 0.5) * dx
     y = north - (np.arange(rows) + 0.5) * dy
     stamps = np.array([np.datetime64("2024-10-04T01:10:54") + np.timedelta64(12 * i, "D")
                        for i in range(times)])
     shape = (times, rows, columns)
-    stack = xr.Dataset(
-        {
-            "vv": (("time", "y", "x"), np.full(shape, fill, dtype="float32")),
-            "mask": (("time", "y", "x"), np.zeros(shape, dtype="uint8")),
-        },
-        coords={"time": stamps, "y": y, "x": x},
-    )
+    values = (np.full(shape, fill, dtype="float32") if fill is not None
+              else np.arange(times * rows * columns, dtype="float32").reshape(shape) + 1)
+    layers = {
+        "vv": (("time", "y", "x"), values),
+        "mask": (("time", "y", "x"), np.zeros(shape, dtype="uint8")),
+    }
+    if static:
+        layers["local_incidence_angle"] = (
+            ("y", "x"), np.arange(rows * columns, dtype="float32").reshape(rows, columns))
+    stack = xr.Dataset(layers, coords={"time": stamps, "y": y, "x": x})
     stack.attrs = {"product": "RTC", "burst_id": "T049-103327-IW3", "track": track,
                    "direction": direction, "spacing": (dx, dy),
                    "footprint": ""}

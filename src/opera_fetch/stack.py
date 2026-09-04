@@ -23,7 +23,7 @@ from opera_fetch import constants as const
 from opera_fetch import cslc, filenames, rtc
 from opera_fetch.aoi import as_geometry
 from opera_fetch.errors import NoAcquisitions
-from opera_fetch.grid import clip, mask_codes, reproject
+from opera_fetch.grid import clip, mask_codes, measured_spacing, reproject
 from opera_fetch.mosaic import TOLERANCE, align_passes, mosaic
 from opera_fetch.search import _listed
 
@@ -220,34 +220,62 @@ def _filter_text(track, direction):
     return " ".join(part for part in asked if part) or "no filter"
 
 
+def _stacked_in_time(parts, join):
+    """Several stacks of one grid as one time series.
+
+    A once-per-burst layer stays (y, x) where the parts agree on it. Concatenating
+    everything together instead broadcasts it along time, which for a real incidence angle
+    is 42 times the bytes and a shape nothing positional expects.
+
+    The variables are the union over the parts rather than the first part's: a cache that
+    grew one track at a time holds static layers for one track and not the other, and
+    VV+VH alongside HH+HV is a configuration constants.LAYERS names.
+    """
+    timed, static = [], []
+    for part in parts:
+        for name, array in part.data_vars.items():
+            into = timed if "time" in array.dims else static
+            if name not in into:
+                into.append(name)
+
+    absent = sorted({name for name in timed + static
+                     for part in parts if name not in part.data_vars})
+    if absent:
+        log.warning("%s not in every pass; where absent the stack holds no observation",
+                    ", ".join(absent))
+
+    stack = xr.concat([part[[name for name in timed if name in part.data_vars]]
+                       for part in parts],
+                      dim="time", join=join, data_vars="all",
+                      combine_attrs="drop_conflicts")
+
+    for name in static:
+        holding = [part for part in parts if name in part.data_vars]
+        layers = [part[name] for part in holding]
+        # Compared per pass rather than per acquisition: a handful of passes, one band each.
+        same = all(np.array_equal(layers[0].values, other.values, equal_nan=True)
+                   for other in layers[1:])
+        if same and len(holding) == len(parts):
+            # One track, or tracks whose geometry agrees: one layer for the whole zone
+            # rather than a copy per acquisition.
+            stack[name] = layers[0]
+        else:
+            # Two tracks see the ground from different angles, so this is not one layer.
+            per_time = xr.concat(
+                [layer.expand_dims(time=part.time)
+                 for layer, part in zip(layers, holding, strict=True)], dim="time")
+            stack[name] = per_time.reindex(time=stack.time)
+
+    return stack
+
+
 def _one_zone(passes, epsg):
     """Every pass of one zone as a single Dataset, concatenated in time.
 
     They are already on the same grid, so join="exact" is a check rather than a
     constraint: anything else means a pass was built on a different lattice.
     """
-    timed = [name for name in passes[0].data_vars if "time" in passes[0][name].dims]
-    static = [name for name in passes[0].data_vars if "time" not in passes[0][name].dims]
-    stack = xr.concat([one[timed] for one in passes], dim="time", join="exact",
-                      combine_attrs="drop_conflicts")
-
-    for name in static:
-        layers = [one[name] for one in passes]
-        # Compared per pass rather than per acquisition: a handful of passes, one band each.
-        same = all(np.array_equal(layers[0].values, other.values, equal_nan=True)
-                   for other in layers[1:])
-        if same:
-            # One track, or tracks whose geometry agrees: one layer for the whole zone
-            # rather than a copy per acquisition.
-            stack[name] = layers[0]
-        else:
-            # Two tracks see the ground from different angles, so this is not one layer.
-            stack[name] = xr.concat(
-                [layer.expand_dims(time=one.time) for layer, one in zip(layers, passes,
-                                                                        strict=True)],
-                dim="time")
-
-    stack = stack.sortby("time")
+    stack = _stacked_in_time(passes, join="exact").sortby("time")
 
     stack.attrs.update(
         epsg=epsg,
@@ -357,15 +385,20 @@ def _onto_one_crs(stacks, crs, resampling=None):
             matched[name] = _oversampled_reproject(stack[name], reference)
         moved.append(matched)
 
-    # data_vars pinned: its default is changing, and a zone's static layer differs from
-    # another zone's, so they have to concatenate rather than be taken as one.
-    joined = xr.concat(moved, dim="time", join="outer", data_vars="all").sortby("time")
+    joined = _stacked_in_time(moved, join="outer").sortby("time")
 
     # Reprojecting floats a mask wherever a cell has no source.
     joined = mask_codes(joined)
 
     joined.attrs = _across_zones([stacks[epsg] for epsg in sorted(stacks)])
     joined.attrs.update(epsg=target.to_epsg(), reprojected_from=sorted(stacks))
+
+    # The grid just moved, and every footprint in the package is worked out from this
+    # number rather than from the coordinates. Left at 30 on a degree grid, bounds_of
+    # answers 30 degrees square.
+    spacing = measured_spacing(joined)
+    if spacing is not None:
+        joined.attrs["spacing"] = spacing
     return joined
 
 
@@ -458,14 +491,12 @@ def _overlapping(bursts, geometry):
 
 
 def _has_data(stack):
-    """Whether a pass has a single finite pixel over the area.
+    """Whether a pass has a single finite pixel over the area, in any acquisition.
 
-    Read from the first acquisition alone: what a burst covers is fixed by its geometry, so
-    an acquisition empty here means every acquisition is.
+    Over the whole series rather than the first acquisition: mosaic outer-joins the times
+    it is given, so a pass whose first date happens to be empty can have every later date
+    behind it. Read from time=0 alone that dropped 41 acquisitions and then blamed the AOI.
     """
     from opera_fetch.validate import primary_variable
 
-    scene = stack[primary_variable(stack)]
-    if "time" in scene.dims:
-        scene = scene.isel(time=0)
-    return bool(np.isfinite(scene).any())
+    return bool(np.isfinite(stack[primary_variable(stack)]).any())
