@@ -285,6 +285,19 @@ Tests marked `data` run against real OPERA granules if they are on this machine 
 themselves otherwise. They are the ones that check this package against products as ASF
 actually ships them.
 
+`tests/test_golden.py` runs `assemble` over synthetic granules written to disk and compares
+everything that comes out against a digest in `tests/golden/`: sizes, coordinates, dtypes,
+attributes, mask code counts and, where the package promises it moves nothing, a hash of
+the values themselves. It needs no network and no cache, so it runs in CI. After a change
+you meant to make:
+
+```bash
+OPERA_FETCH_GOLDEN=update pytest tests/test_golden.py
+```
+
+Read the diff before committing it. A digest that changed for a reason you cannot name is
+the finding, not the noise.
+
 ## Sources
 
 Very helpful repositories consulted:

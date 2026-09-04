@@ -1,0 +1,117 @@
+{
+  "attrs": {
+    "burst_id": "T049-103327-IW3, T049-103328-IW3",
+    "bursts": 2,
+    "direction": "ASCENDING",
+    "epsg": 32612,
+    "footprint": "POLYGON ((-107.99184661347535 39.099704280401774, -107.99196143117977 39.09700465293075, -107.99611882252219 39.09711193495565, -108.00027623602902 39.09721906898339, -108.00016173454065 39.0999187169646, -107.99600416292415 39.099811572688836, -107.99184661347535 39.099704280401774))",
+    "granules": "OPERA_L2_RTC-S1_T049-103327-IW3_20241004T011054Z_20241004T043235Z_S1A_30_v1.0\nOPERA_L2_RTC-S1_T049-103327-IW3_20241016T011054Z_20241016T043235Z_S1A_30_v1.0\nOPERA_L2_RTC-S1_T049-103328-IW3_20241004T011054Z_20241004T043235Z_S1A_30_v1.0\nOPERA_L2_RTC-S1_T049-103328-IW3_20241016T011054Z_20241016T043235Z_S1A_30_v1.0",
+    "product": "RTC",
+    "product_version": "1.0",
+    "spacing": [
+      30.0,
+      30.0
+    ],
+    "track": 49,
+    "tracks": [
+      49
+    ]
+  },
+  "bounds": [
+    759570.0,
+    4331910.0,
+    759960.0,
+    4332090.0
+  ],
+  "coords": {
+    "absolute_orbit": [
+      55893,
+      55893
+    ],
+    "direction": [
+      "ASCENDING",
+      "ASCENDING"
+    ],
+    "platform": [
+      "S1A",
+      "S1A"
+    ],
+    "time": [
+      "2024-10-04T01:10:54",
+      "2024-10-16T01:10:54"
+    ],
+    "track": [
+      49,
+      49
+    ]
+  },
+  "crs": 32612,
+  "sizes": {
+    "time": 2,
+    "x": 13,
+    "y": 6
+  },
+  "spacing": [
+    30.0,
+    30.0
+  ],
+  "variables": {
+    "local_incidence_angle": {
+      "attrs": {
+        "long_name": "local incidence angle",
+        "units": "radians"
+      },
+      "dims": [
+        "y",
+        "x"
+      ],
+      "dtype": "float32",
+      "hash": "0073a8ab257fd6a6",
+      "observed": 72,
+      "range": [
+        0.2164,
+        0.3403
+      ]
+    },
+    "mask": {
+      "attrs": {
+        "_FillValue": 255,
+        "flag_meanings": "0 clear, 1 shadow, 2 layover, 3 both, 255 no observation",
+        "long_name": "layover and shadow mask",
+        "units": "1"
+      },
+      "codes": {
+        "0": 36,
+        "1": 36,
+        "2": 36,
+        "255": 12,
+        "3": 36
+      },
+      "dims": [
+        "time",
+        "y",
+        "x"
+      ],
+      "dtype": "uint8",
+      "hash": "681e3ad1308443be"
+    },
+    "vv": {
+      "attrs": {
+        "long_name": "VV gamma0, linear power",
+        "units": "1"
+      },
+      "dims": [
+        "time",
+        "y",
+        "x"
+      ],
+      "dtype": "float32",
+      "hash": "f2a85b208e79bd70",
+      "observed": 144,
+      "range": [
+        107327.0312,
+        119329.0859
+      ]
+    }
+  }
+}

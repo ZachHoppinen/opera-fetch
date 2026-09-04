@@ -1,0 +1,99 @@
+{
+  "attrs": {
+    "burst_id": "T049-103327-IW3",
+    "bursts": 1,
+    "direction": "ASCENDING",
+    "epsg": 32612,
+    "footprint": "POLYGON ((-108.00027623602902 39.09721906898339, -107.99611882252219 39.09711193495565, -107.99600416292415 39.099811572688836, -108.00016173454065 39.0999187169646, -108.00027623602902 39.09721906898339))",
+    "granules": "OPERA_L2_RTC-S1_T049-103327-IW3_20241004T011054Z_20241121T000000Z_S1A_30_v1.0\nOPERA_L2_RTC-S1_T049-103327-IW3_20241016T011054Z_20241016T043235Z_S1A_30_v1.0",
+    "product": "RTC",
+    "product_version": "1.0",
+    "spacing": [
+      30.0,
+      30.0
+    ],
+    "track": 49,
+    "tracks": [
+      49
+    ]
+  },
+  "bounds": [
+    759420.0,
+    4331850.0,
+    759780.0,
+    4332150.0
+  ],
+  "coords": {
+    "absolute_orbit": [
+      55893,
+      55893
+    ],
+    "direction": [
+      "ASCENDING",
+      "ASCENDING"
+    ],
+    "platform": [
+      "S1A",
+      "S1A"
+    ],
+    "time": [
+      "2024-10-04T01:10:54",
+      "2024-10-16T01:10:54"
+    ],
+    "track": [
+      49,
+      49
+    ]
+  },
+  "crs": 32612,
+  "sizes": {
+    "time": 2,
+    "x": 12,
+    "y": 10
+  },
+  "spacing": [
+    30.0,
+    30.0
+  ],
+  "variables": {
+    "mask": {
+      "attrs": {
+        "flag_meanings": "0 clear, 1 shadow, 2 layover, 3 both, 255 no observation",
+        "long_name": "layover and shadow mask",
+        "units": "1"
+      },
+      "codes": {
+        "0": 54,
+        "1": 54,
+        "2": 54,
+        "255": 24,
+        "3": 54
+      },
+      "dims": [
+        "time",
+        "y",
+        "x"
+      ],
+      "dtype": "uint8",
+      "hash": "599ca85630b8c836"
+    },
+    "vv": {
+      "attrs": {
+        "long_name": "VV gamma0, linear power",
+        "units": "1"
+      },
+      "dims": [
+        "time",
+        "y",
+        "x"
+      ],
+      "dtype": "float32",
+      "hash": "94792651673c6637",
+      "observed": 240,
+      "range": [
+        107327.0,
+        119327.1172
+      ]
+    }
+  }
+}

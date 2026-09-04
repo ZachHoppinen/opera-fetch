@@ -1,0 +1,130 @@
+{
+  "attrs": {
+    "burst_id": "T049-103327-IW3, T056-118980-IW2",
+    "bursts": 2,
+    "epsg": 4326,
+    "footprint": "POLYGON ((-107.99611882252219 39.09711193495565, -108.00027623602902 39.09721906898339, -108.00016173454065 39.0999187169646, -107.99995365256204 39.09991335450908, -107.99995375385886 39.09991574273336, -107.99579616071968 39.100022743107004, -107.99568181295214 39.097323085175965, -107.99611032286896 39.097312057622815, -107.99611882252219 39.09711193495565))",
+    "granules": "OPERA_L2_RTC-S1_T049-103327-IW3_20241004T011054Z_20241004T043235Z_S1A_30_v1.0\nOPERA_L2_RTC-S1_T049-103327-IW3_20241016T011054Z_20241016T043235Z_S1A_30_v1.0\nOPERA_L2_RTC-S1_T056-118980-IW2_20241004T011054Z_20241004T043235Z_S1A_30_v1.0\nOPERA_L2_RTC-S1_T056-118980-IW2_20241016T011054Z_20241016T043235Z_S1A_30_v1.0",
+    "product": "RTC",
+    "product_version": "1.0",
+    "reprojected_from": [
+      32612,
+      32613
+    ],
+    "spacing": [
+      0.000315,
+      0.000315
+    ],
+    "tracks": [
+      49,
+      56
+    ]
+  },
+  "bounds": [
+    -108.0,
+    39.097,
+    -107.996,
+    39.1
+  ],
+  "coords": {
+    "absolute_orbit": [
+      55893,
+      55893,
+      55893,
+      55893
+    ],
+    "direction": [
+      "ASCENDING",
+      "DESCENDING",
+      "ASCENDING",
+      "DESCENDING"
+    ],
+    "platform": [
+      "S1A",
+      "S1A",
+      "S1A",
+      "S1A"
+    ],
+    "time": [
+      "2024-10-04T01:10:54",
+      "2024-10-04T01:10:54",
+      "2024-10-16T01:10:54",
+      "2024-10-16T01:10:54"
+    ],
+    "track": [
+      49,
+      56,
+      49,
+      56
+    ]
+  },
+  "crs": 4326,
+  "sizes": {
+    "time": 4,
+    "x": 14,
+    "y": 9
+  },
+  "spacing": [
+    0.000315,
+    0.000315
+  ],
+  "variables": {
+    "local_incidence_angle": {
+      "attrs": {
+        "_FillValue": "nan",
+        "long_name": "local incidence angle",
+        "units": "radians"
+      },
+      "dims": [
+        "time",
+        "y",
+        "x"
+      ],
+      "dtype": "float32",
+      "observed": 476,
+      "range": [
+        0.1745,
+        0.3822
+      ]
+    },
+    "mask": {
+      "attrs": {
+        "_FillValue": 255,
+        "flag_meanings": "0 clear, 1 shadow, 2 layover, 3 both, 255 no observation",
+        "long_name": "layover and shadow mask",
+        "units": "1"
+      },
+      "codes": {
+        "0": 100,
+        "1": 100,
+        "2": 98,
+        "255": 106,
+        "3": 100
+      },
+      "dims": [
+        "time",
+        "y",
+        "x"
+      ],
+      "dtype": "uint8"
+    },
+    "vv": {
+      "attrs": {
+        "_FillValue": "nan",
+        "long_name": "VV gamma0, linear power",
+        "units": "1"
+      },
+      "dims": [
+        "time",
+        "y",
+        "x"
+      ],
+      "dtype": "float32",
+      "observed": 452,
+      "range": [
+        107327.0,
+        134980.125
+      ]
+    }
+  }
+}
