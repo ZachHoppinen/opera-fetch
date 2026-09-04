@@ -222,3 +222,26 @@ def test_a_burst_counts_its_looks_only_where_it_observed_something():
     # The values were always right: xarray renormalizes the weights over what is finite.
     assert float(merged.vv[0, 0, 0]) == pytest.approx((1 * 4.0 + 9 * 100.0) / 10)
     assert float(merged.vv[0, 0, 6]) == pytest.approx(4.0)
+
+
+def test_a_pass_chains_along_the_sweep_rather_than_from_its_first_acquisition():
+    """Each acquisition joins the pass before it when it falls within the tolerance of the
+    one before it. A track is acquired as a continuous sweep, so its ends can be further
+    apart than the tolerance; the cost is that a tolerance set too wide chains."""
+    import pandas as pd
+
+    from opera_fetch.mosaic import align_passes
+
+    def at(minutes):
+        burst = make_burst(west=500_010, north=4_332_210, times=1)
+        return burst.assign_coords(time=burst.indexes["time"] + pd.Timedelta(minutes=minutes))
+
+    stepped = align_passes([at(9 * i) for i in range(5)], "10min")
+    stamps = {t for burst in stepped for t in burst.indexes["time"]}
+    assert len(stamps) == 1, "36 minutes end to end, nine at a time, is one sweep"
+
+    apart = align_passes([at(0), at(11)], "10min")
+    assert len({t for burst in apart for t in burst.indexes["time"]}) == 2
+
+    # And the stamp is the earliest of them, which is what the mosaic carries.
+    assert min(stamps) == at(0).indexes["time"][0]

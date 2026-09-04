@@ -31,8 +31,15 @@ def align_passes(bursts, tolerance=TOLERANCE):
     """Give the bursts of one overpass the same timestamp, so they can be mosaicked.
 
     Neighbouring bursts are acquired a couple of seconds apart, which is enough to make
-    every burst's time axis unique and a mosaic of them an empty diagonal ribbon. Times
-    closer than the tolerance become one pass, stamped with the earliest of them.
+    every burst's time axis unique and a mosaic of them an empty diagonal ribbon. Each
+    acquisition joins the pass before it when it falls within the tolerance of the one
+    before it, and the pass is stamped with the earliest of them.
+
+    Within the tolerance of the previous one, not of the first: a run of acquisitions each
+    a step apart is one pass however long the run gets. That is what a pass is, since a
+    track is acquired as a continuous sweep and its far ends can be further apart than any
+    tolerance worth setting. It also means a tolerance set too wide does not merely round
+    the edges, it chains, so the default is minutes where an overpass repeats in days.
     """
     every_time = set()
     for burst in bursts:
