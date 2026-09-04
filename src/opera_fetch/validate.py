@@ -11,7 +11,8 @@ from pathlib import Path
 import numpy as np
 
 from opera_fetch import constants as const
-from opera_fetch.grid import bounds_of, reproject, spacing_of
+from opera_fetch.aoi import projected
+from opera_fetch.grid import bounds_of, spacing_of
 
 log = logging.getLogger(__name__)
 
@@ -227,12 +228,34 @@ def _undefined_codes(stack):
     return ", ".join(str(code) for code in sorted(stray))
 
 
+def in_range(geometry, assumed_lonlat):
+    """Refuse coordinates that are not lon/lat, having been read as lon/lat.
+
+    ASF clamps a latitude past 90 rather than complaining, which degenerates the polygon
+    and returns nothing: the archive gets blamed for a transposed pair or a forgotten
+    aoi_crs. The message says which value is wrong, and what it probably was.
+    """
+    west, south, east, north = geometry.bounds
+    bad = ([f"longitude {value:g}" for value in (west, east) if abs(value) > 180]
+           + [f"latitude {value:g}" for value in (south, north) if abs(value) > 90])
+    if not bad:
+        return
+
+    hint = ""
+    if assumed_lonlat and abs(south) <= 180 and abs(north) <= 180 and abs(west) <= 90:
+        hint = (". These look like (south, west, north, east): a box is "
+                "(west, south, east, north)")
+    elif assumed_lonlat and max(abs(west), abs(east), abs(south), abs(north)) > 1000:
+        hint = ". These look like projected metres, so pass aoi_crs with the zone they are in"
+    raise ValueError(f"AOI is not in lon/lat: {', '.join(bad)}{hint}")
+
+
 def _aoi_fraction(stack, aoi):
     """How much of the AOI polygon the stack's grid actually covers."""
     from shapely.geometry import box
 
     from opera_fetch.aoi import as_geometry
 
-    geometry = reproject(as_geometry(aoi), stack.rio.crs)
+    geometry = projected(as_geometry(aoi), stack.rio.crs)
     covered = geometry.intersection(box(*bounds_of(stack)))
     return float(covered.area / geometry.area) if geometry.area else float("nan")

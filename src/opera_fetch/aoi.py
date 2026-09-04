@@ -43,7 +43,12 @@ def as_geometry(aoi, crs=None):
     if geometry.is_empty or geometry.area == 0:
         raise ValueError("AOI has no area")
 
-    _in_range(geometry, native is None and crs == WGS84)
+    # Checked here rather than left to ASF, which clamps rather than complaining.
+    # Imported inside the call because validate reads a grid, and a grid is placed
+    # against an AOI: at module level the two would import each other.
+    from opera_fetch.validate import in_range
+
+    in_range(geometry, native is None and crs == WGS84)
 
     # A box across 180 comes out as its complement: the whole world but the box. Silently
     # searching the globe is worse than refusing, and splitting it is the caller's call
@@ -58,6 +63,21 @@ def as_geometry(aoi, crs=None):
     return geometry
 
 
+def projected(geometry, crs):
+    """An area in a projected CRS, given the lon/lat one everything here hands around.
+
+    Named for what it returns rather than for the operation: every geometry in this package
+    comes out of ``as_geometry`` and is therefore lon/lat, so there is only ever one
+    direction to go. It moves an outline and never any data, which is why it sits with the
+    AOI rather than with the grid.
+    """
+    crs = CRS.from_user_input(crs)
+    if crs == WGS84:
+        return geometry
+    return shapely_transform(Transformer.from_crs(WGS84, crs, always_xy=True).transform,
+                             geometry)
+
+
 def one_polygon(geometry):
     """One polygon covering an area, which is all ASF's search takes.
 
@@ -70,28 +90,6 @@ def one_polygon(geometry):
     log.warning("AOI is %d separate polygons; searching their convex hull. What comes "
                 "back is still clipped to the polygons themselves", len(geometry.geoms))
     return geometry.convex_hull
-
-
-def _in_range(geometry, assumed_lonlat):
-    """Refuse coordinates that are not lon/lat, having been read as lon/lat.
-
-    ASF clamps a latitude past 90 rather than complaining, which degenerates the polygon
-    and returns nothing: the archive gets blamed for a transposed pair or a forgotten
-    aoi_crs. The message says which value is wrong, and what it probably was.
-    """
-    west, south, east, north = geometry.bounds
-    bad = ([f"longitude {value:g}" for value in (west, east) if abs(value) > 180]
-           + [f"latitude {value:g}" for value in (south, north) if abs(value) > 90])
-    if not bad:
-        return
-
-    hint = ""
-    if assumed_lonlat and abs(south) <= 180 and abs(north) <= 180 and abs(west) <= 90:
-        hint = (". These look like (south, west, north, east): a box is "
-                "(west, south, east, north)")
-    elif assumed_lonlat and max(abs(west), abs(east), abs(south), abs(north)) > 1000:
-        hint = ". These look like projected metres, so pass aoi_crs with the zone they are in"
-    raise ValueError(f"AOI is not in lon/lat: {', '.join(bad)}{hint}")
 
 
 def _to_shapely(aoi):

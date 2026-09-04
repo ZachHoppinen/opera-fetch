@@ -1,4 +1,9 @@
-"""Names, layers and grid numbers for the four OPERA Sentinel-1 products."""
+"""Names, layers and grid numbers for the four OPERA Sentinel-1 products.
+
+Every number here is either read off a delivered granule or taken from a published source,
+and the comment says which. Checked against opera-utils 0.25.6 and against RTC v1.0 and
+CSLC v1.1 granules in ``data/raw``, so a claim can be re-checked rather than believed.
+"""
 
 import re
 from importlib.metadata import PackageNotFoundError, version
@@ -46,8 +51,9 @@ DEFAULT_LAYERS = {
 LOOKS = "number_of_looks"
 
 # The layers inside the two HDF5 products. CSLC is co-pol only, and it is HH wherever
-# Sentinel-1 acquires HH+HV, which is most of the high Arctic and Antarctic. opera-utils'
-# ``get_dataset_name`` reads /data/VV or /data/HH for the same reason.
+# Sentinel-1 acquires HH+HV, which is most of the high Arctic and Antarctic.
+# opera_utils._cslc.get_dataset_name does the same, falling back to /data/HH when /data/VV
+# is absent, and opera_utils.constants.OPERA_DATASET_NAME is "/data/VV".
 CSLC_DATA = ("VV", "HH")
 CSLC_STATIC_DATA = ("local_incidence_angle", "layover_shadow_mask", "los_east", "los_north")
 
@@ -58,11 +64,21 @@ CSLC_STATIC_DATA = ("local_incidence_angle", "layover_shadow_mask", "los_east", 
 # giving up coherence. See opera_fetch.resample.
 DEFAULT_RESAMPLING = {"real": "nearest", "mask": "nearest"}
 
-# Codes and fill values as OPERA defines them: opera-adt/RTC ``h5_prep.py`` for RTC,
-# opera-adt/COMPASS ``s1_geocode_metadata.py`` for CSLC.
-# Layover/shadow codes: 0 clear, 1 shadow, 2 layover, 3 both. RTC ships one mask per
-# acquisition; CSLC ships none, and its only mask is the once-per-burst static one. Both
-# are called "mask" here so `stack.where(stack.mask == 0)` reads the same either way.
+# The codes are stated by the products themselves rather than inferred.
+#
+#   RTC, the mask GeoTIFF's LAYER_DESCRIPTION tag:
+#     "Mask Layer. Values: 0: not masked; 1: shadow; 2: layover; 3: layover and shadow;
+#      255: invalid/fill value"
+#     and the band declares nodata=255, dtype uint8.
+#   CSLC, the description attribute on /data/layover_shadow_mask:
+#     "Layover shadow mask. 0=no layover, no shadow; 1=shadow; 2=layover;
+#      3=shadow and layover."
+#     dtype int8. The description names no fill, but 127 is present in real data. Do not
+#     read the HDF5 fillvalue instead: it is 0, which here means clear ground.
+#
+# RTC ships one mask per acquisition; CSLC ships none, and its only mask is the
+# once-per-burst static one. Both are called "mask" here so `stack.where(stack.mask == 0)`
+# reads the same either way.
 MASK_NODATA = {RTC: 255, CSLC: 127}
 MASK_DTYPE = {RTC: "uint8", CSLC: "int8"}
 MASK_MEANINGS = "0 clear, 1 shadow, 2 layover, 3 both"
@@ -72,12 +88,15 @@ MASK_MEANINGS = "0 clear, 1 shadow, 2 layover, 3 both"
 # ASF, not read from a document.
 ARCHIVE_START = "2016-01-01"
 
-# T049-103327-IW3 in a filename, t049_103327_iw3 inside an HDF5.
+# T049-103327-IW3 in a filename, t049_103327_iw3 inside an HDF5. The same pattern as
+# opera_utils.constants.OPERA_BURST_RE, which is where the two spellings come from.
 BURST_ID = re.compile(r"T(\d{3})[-_](\d{6})[-_](IW[1-3])", re.IGNORECASE)
 
-# The fields of a granule name, so nothing has to count underscores to find one. Static
-# products carry a reference date where the others carry an acquisition and a processing
-# time, and only CSLC names its polarization; the rest name it in the layer suffix.
+# The fields of a granule name, so nothing has to count underscores to find one. Follows
+# opera_utils.constants.CSLC_S1_FILE_REGEX, widened to the other three products: a static
+# product carries a reference date where the others carry an acquisition and a processing
+# time, and only CSLC names its polarization, the rest naming it in the layer suffix.
+# S1[A-E] rather than S1[AB] for the same reason opera-utils uses S1[ABCDE].
 GRANULE = re.compile(
     r"OPERA_L2_(?P<product>[A-Z0-9-]+)_"
     r"(?P<burst_id>T\d{3}-\d{6}-IW[1-3])_"

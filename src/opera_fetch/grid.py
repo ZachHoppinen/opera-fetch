@@ -13,11 +13,10 @@ import logging
 import numpy as np
 import rioxarray  # noqa: F401  registers the .rio accessor
 import xarray as xr
-from pyproj import CRS, Transformer
-from shapely.ops import transform as shapely_transform
+from pyproj import CRS
 
 from opera_fetch import constants as const
-from opera_fetch.aoi import WGS84, as_geometry
+from opera_fetch.aoi import as_geometry, projected
 
 log = logging.getLogger(__name__)
 
@@ -140,7 +139,7 @@ def clip(obj, aoi, crs=None, mask=False):
     """
     # The outline moves to the data, never the data to the outline.
     target = CRS.from_user_input(obj.rio.crs)
-    geometry = reproject(as_geometry(aoi, crs), target)
+    geometry = projected(as_geometry(aoi, crs), target)
 
     left, bottom, right, top = bounds_of(obj)
     west, south, east, north = geometry.bounds
@@ -187,16 +186,6 @@ def _mask_nodata_declared(obj):
         if name.endswith("mask") and array.rio.nodata is None:
             out[name] = array.rio.write_nodata(nodata)
     return out
-
-
-def reproject(geometry, crs):
-    """A lon/lat geometry in another projection. The only reprojection in the package,
-    and it moves an outline rather than any data."""
-    crs = CRS.from_user_input(crs)
-    if crs == WGS84:
-        return geometry
-    return shapely_transform(Transformer.from_crs(WGS84, crs, always_xy=True).transform,
-                             geometry)
 
 
 def _centres(edge, spacing, low, high):

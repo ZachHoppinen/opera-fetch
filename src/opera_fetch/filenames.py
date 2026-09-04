@@ -1,7 +1,10 @@
 """What an OPERA filename says about the file.
 
-Parsing by named groups follows opera-utils' ``CSLC_S1_FILE_REGEX``, widened here to cover
-all four products, including the static ones that carry no processing time.
+Parsing by named groups follows ``opera_utils.constants.CSLC_S1_FILE_REGEX`` (checked
+against opera-utils 0.25.6), widened here to cover all four products, including the static
+ones that carry no processing time. The pattern itself is in ``constants.GRANULE``.
+
+The examples below are real granules from ``data/raw``, not invented ones.
 
     OPERA_L2_RTC-S1_T049-103327-IW3_20241004T011054Z_20241004T043235Z_S1A_30_v1.0_VV.tif
     OPERA_L2_RTC-S1-STATIC_T049-103327-IW3_20140403_S1A_30_v1.0_local_incidence_angle.tif

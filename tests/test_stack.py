@@ -77,11 +77,10 @@ def test_a_misaligned_burst_is_not_swallowed_as_an_empty_one():
 
 def test_a_utm_box_can_be_given_as_the_aoi_in_that_zone():
     """There is no separate bounds argument: an exact box is an aoi with aoi_crs set."""
-    from opera_fetch.aoi import as_geometry
-    from opera_fetch.grid import reproject
+    from opera_fetch.aoi import as_geometry, projected
 
     box = (326_500, 4_302_000, 339_000, 4_312_000)
-    back = reproject(as_geometry(box, "EPSG:32613"), 32613).bounds
+    back = projected(as_geometry(box, "EPSG:32613"), 32613).bounds
     # Within a cell of what was asked for, which the lattice widens out to anyway.
     assert all(abs(a - b) < 30 for a, b in zip(box, back, strict=True))
 

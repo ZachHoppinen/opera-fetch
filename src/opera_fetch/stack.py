@@ -21,9 +21,9 @@ from pyproj import CRS
 
 from opera_fetch import constants as const
 from opera_fetch import cslc, filenames, rtc
-from opera_fetch.aoi import as_geometry
+from opera_fetch.aoi import as_geometry, projected
 from opera_fetch.errors import NoAcquisitions
-from opera_fetch.grid import clip, mask_codes, measured_spacing, reproject
+from opera_fetch.grid import clip, mask_codes, measured_spacing
 from opera_fetch.mosaic import TOLERANCE, align_passes, mosaic
 from opera_fetch.search import as_list
 
@@ -170,7 +170,7 @@ def assemble(paths, aoi=None, aoi_crs=None, how=None, tolerance=TOLERANCE,
         # Sizing the grid from the AOI keeps a whole track from being mostly empty space.
         # Every pass of a zone gets the same bounds, and they are already on one lattice,
         # so the grids come out identical and the passes concatenate without resampling.
-        area = None if aoi is None else reproject(aoi, key.epsg).bounds
+        area = None if aoi is None else projected(aoi, key.epsg).bounds
         stack = mosaic(align_passes(wanted, tolerance), bounds=area, how=how)
         if aoi is not None and mask:
             stack = clip(stack, aoi, mask=True)
