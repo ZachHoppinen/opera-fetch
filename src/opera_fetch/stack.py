@@ -25,7 +25,7 @@ from opera_fetch.aoi import as_geometry
 from opera_fetch.errors import NoAcquisitions
 from opera_fetch.grid import clip, mask_codes, measured_spacing, reproject
 from opera_fetch.mosaic import TOLERANCE, align_passes, mosaic
-from opera_fetch.search import _listed
+from opera_fetch.search import as_list
 
 log = logging.getLogger(__name__)
 
@@ -208,7 +208,7 @@ def assemble(paths, aoi=None, aoi_crs=None, how=None, tolerance=TOLERANCE,
 
 def _asked_for(key, track, direction):
     """Whether a pass is one the caller wants, with None meaning no restriction."""
-    if track is not None and key.track not in {int(t) for t in _listed(track)}:
+    if track is not None and key.track not in {int(t) for t in as_list(track)}:
         return False
     return direction is None or key.direction.upper() == str(direction).upper()
 
@@ -224,8 +224,8 @@ def _stacked_in_time(parts, join):
     """Several stacks of one grid as one time series.
 
     A once-per-burst layer stays (y, x) where the parts agree on it. Concatenating
-    everything together instead broadcasts it along time, which for a real incidence angle
-    is 42 times the bytes and a shape nothing positional expects.
+    everything together instead broadcasts it along time: a copy of one band per
+    acquisition, and a shape nothing positional expects.
 
     The variables are the union over the parts rather than the first part's: a cache that
     grew one track at a time holds static layers for one track and not the other, and
@@ -387,10 +387,9 @@ def _onto_one_crs(stacks, crs, resampling=None):
             matched[name] = _oversampled_reproject(stack[name], reference)
         moved.append(matched)
 
+    # Reprojecting floats a mask wherever a cell has no source, which _stacked_in_time
+    # puts back to class codes along with everything else its own join fills.
     joined = _stacked_in_time(moved, join="outer").sortby("time")
-
-    # Reprojecting floats a mask wherever a cell has no source.
-    joined = mask_codes(joined)
 
     joined.attrs = _across_zones([stacks[epsg] for epsg in sorted(stacks)])
     joined.attrs.update(epsg=target.to_epsg(), reprojected_from=sorted(stacks))
@@ -421,10 +420,10 @@ def _across_zones(stacks):
     outlines = [shapely.wkt.loads(s.attrs["footprint"]) for s in stacks
                 if s.attrs.get("footprint")]
     return shared | {
-        # _listed because a one-element list attribute comes back from netCDF as a bare
+        # as_list because a one-element list attribute comes back from netCDF as a bare
         # scalar, so a single-track zone read from disk has tracks=49 rather than [49].
         "tracks": sorted({int(t) for s in stacks
-                          for t in _listed(s.attrs.get("tracks") or s.attrs.get("track"))
+                          for t in as_list(s.attrs.get("tracks") or s.attrs.get("track"))
                           if t is not None}),
         "bursts": sum(s.attrs.get("bursts", 1) for s in stacks),
         "burst_id": ", ".join(sorted({b for s in stacks
@@ -511,7 +510,7 @@ def _has_data(stack):
 
     Over the whole series rather than the first acquisition: mosaic outer-joins the times
     it is given, so a pass whose first date happens to be empty can have every later date
-    behind it. Read from time=0 alone that dropped 41 acquisitions and then blamed the AOI.
+    behind it, and dropping the pass then reads as an AOI that covers nothing.
     """
     from opera_fetch.validate import primary_variable
 

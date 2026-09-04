@@ -154,7 +154,6 @@ def fetch_stacks(aoi, start=None, end=None, product=const.RTC, cache_dir="data/r
         sizes |= file_sizes(statics, static_layers)
 
     log.info("step 3/6  downloading %d files", len(urls))
-    # The sizes are what tells a finished file from one a killed transfer left behind.
     paths = download(urls, cache_dir, max_workers=max_workers, sizes=sizes)
 
     # The cache may hold a file some earlier run left half written, which the

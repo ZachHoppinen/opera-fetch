@@ -35,21 +35,20 @@ def spacing_of(obj):
     difference.
     """
     spacing = obj.attrs.get("spacing")
+    measured = measured_spacing(obj)
     if spacing is not None:
         spacing = (float(spacing[0]), float(spacing[1]))
-        if obj.sizes.get("x", 0) > 1 and obj.sizes.get("y", 0) > 1:
-            measured = (float(abs(obj.x[1] - obj.x[0])), float(abs(obj.y[1] - obj.y[0])))
-            if not np.allclose(spacing, measured):
-                log.warning("the spacing attribute says %s but the coordinates are %s "
-                            "apart; the attribute is being used. Whatever re-gridded this "
-                            "did not update it.", spacing, measured)
+        if measured is not None and not np.allclose(spacing, measured):
+            log.warning("the spacing attribute says %s but the coordinates are %s apart; "
+                        "the attribute is being used. Whatever re-gridded this did not "
+                        "update it.", spacing, measured)
         return spacing
 
-    if obj.sizes["x"] < 2 or obj.sizes["y"] < 2:
+    if measured is None:
         raise ValueError(
             "this grid is one pixel across and carries no spacing attribute, so there is "
             "nothing to read the posting from")
-    return (float(abs(obj.x[1] - obj.x[0])), float(abs(obj.y[1] - obj.y[0])))
+    return measured
 
 
 def measured_spacing(obj):

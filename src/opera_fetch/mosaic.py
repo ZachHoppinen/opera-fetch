@@ -166,7 +166,7 @@ def _first(placed):
     # string one to object. Every burst carries the same ones, so put them back as they were.
     kept = {name: placed[0][name] for name in placed[0].coords if name not in combined.dims}
     # combine_first fills too, and a filled mask is a float one. This is the default for
-    # complex data, so every CSLC mosaic carried two nodata representations at once.
+    # complex data, so a CSLC mosaic would carry NaN and the nodata code at once.
     combined = mask_codes(combined.assign_coords(kept))
     return _keep_attrs(combined, placed[0])
 

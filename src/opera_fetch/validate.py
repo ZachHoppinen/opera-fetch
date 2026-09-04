@@ -93,8 +93,6 @@ def report(stack, aoi=None, strict=True):
     if times is not None and found["median_coverage"] == 0:
         damage.append("no acquisition has a single finite pixel")
     if found.get("aoi_covered") == 0:
-        # Computed since the first version and never looked at, so a stack of the wrong
-        # area passed with no damage at all.
         damage.append("the grid and the AOI do not overlap")
     stray = _undefined_codes(stack)
     if stray:
@@ -180,9 +178,8 @@ def quicklook(stack, path, variable=None, figsize=(6, 4), dpi=150):
 def primary_variable(stack):
     """The variable a report is about: the first real data layer, not a static one.
 
-    A mask only where there is nothing else. Reported on as though it were backscatter, a
-    stack of nothing but the no-observation code came back as fully covered, because 255
-    is finite and every cell of it is True.
+    A mask only where there is nothing else. Reported on as though it were backscatter it
+    reads as fully covered whatever it holds, because a class code is a finite number.
     """
     for name in ("vv", "hh", "vh", "hv"):
         if name in stack.data_vars:
@@ -199,9 +196,10 @@ def primary_variable(stack):
 def _observed(array, stack):
     """Where a layer holds an observation, which for a mask is not the same as finite.
 
-    255 is a perfectly finite number and it means no observation was made.
+    255 is a perfectly finite number and it means no observation was made. Complex counts
+    as float here: a CSLC scene carries its gaps as NaN like any other.
     """
-    if array.dtype.kind == "f":
+    if array.dtype.kind in "fc":
         return np.isfinite(array)
     return array != const.MASK_NODATA[stack.attrs.get("product", const.RTC)]
 
@@ -220,7 +218,12 @@ def _undefined_codes(stack):
     for name, array in stack.data_vars.items():
         if not name.endswith("mask") or array.dtype.kind == "f":
             continue
-        stray |= {int(code) for code in np.unique(np.asarray(array)) if int(code) not in known}
+        # np.unique over the dask array rather than over np.asarray of it: the second
+        # pulls the whole cube into memory, and a season of one track is gigabytes.
+        codes = np.unique(array.data)
+        if hasattr(codes, "compute"):
+            codes = codes.compute()
+        stray |= {int(code) for code in codes if int(code) not in known}
     return ", ".join(str(code) for code in sorted(stray))
 
 

@@ -68,9 +68,9 @@ def search(aoi=None, start=None, end=None, product=const.RTC, burst_id=None, tra
         query["intersectsWith"] = one_polygon(as_geometry(aoi)).wkt
     if burst_id is not None:
         # ASF wants T049_103327_IW3; the hyphenated form in every filename returns nothing.
-        query["operaBurstID"] = [str(b).replace("-", "_").upper() for b in _listed(burst_id)]
+        query["operaBurstID"] = [str(b).replace("-", "_").upper() for b in as_list(burst_id)]
     if track is not None:
-        query["relativeOrbit"] = [int(t) for t in _listed(track)]
+        query["relativeOrbit"] = [int(t) for t in as_list(track)]
     if direction is not None:
         query["flightDirection"] = str(direction).upper()
     if product in const.TIME_VARYING:
@@ -119,16 +119,8 @@ def data_urls(frame, layers=None):
     """
     if frame.empty:
         return []
+    wanted = _wanted(frame, layers)
     product = _one(frame, "product")
-    layers = const.DEFAULT_LAYERS[product] if layers is None else layers
-
-    # Kept as {url: bytes} so the same pass gives both the list and its size.
-    wanted = {}
-    for urls, sizes in zip(frame["urls"], frame["sizes"], strict=True):
-        for url in urls:
-            name = url.rsplit("/", 1)[-1]
-            if _is_data(name, product, layers):
-                wanted[url] = (sizes or {}).get(name, 0)
 
     log.info("%s: %d files, %.1f GB, for %d granules",
              product, len(wanted), sum(wanted.values()) / 1e9, len(frame))
@@ -145,11 +137,21 @@ def file_sizes(frame, layers=None):
     """
     if frame.empty:
         return {}
+    return {url.rsplit("/", 1)[-1]: size for url, size in _wanted(frame, layers).items()}
+
+
+def _wanted(frame, layers):
+    """The data URLs in a search result and the size ASF declares for each, as {url: bytes}."""
     product = _one(frame, "product")
     layers = const.DEFAULT_LAYERS[product] if layers is None else layers
-    return {url.rsplit("/", 1)[-1]: (sizes or {}).get(url.rsplit("/", 1)[-1], 0)
-            for urls, sizes in zip(frame["urls"], frame["sizes"], strict=True)
-            for url in urls if _is_data(url.rsplit("/", 1)[-1], product, layers)}
+
+    wanted = {}
+    for urls, sizes in zip(frame["urls"], frame["sizes"], strict=True):
+        for url in urls:
+            name = url.rsplit("/", 1)[-1]
+            if _is_data(name, product, layers):
+                wanted[url] = (sizes or {}).get(name, 0)
+    return wanted
 
 
 def _is_data(name, product, layers):
@@ -192,7 +194,8 @@ def _frame(results):
     return frame.sort_values(["burst_id", "time"], ignore_index=True)
 
 
-def _listed(value):
+def as_list(value):
+    """One value or several as a list, where a string counts as one and not as its characters."""
     if isinstance(value, (str, bytes)) or not hasattr(value, "__iter__"):
         return [value]
     return list(value)

@@ -14,7 +14,10 @@ WGS84 = CRS.from_epsg(4326)
 
 
 def as_geometry(aoi, crs=None):
-    """An area as one shapely polygon in lon/lat.
+    """An area as a shapely polygon in lon/lat, or several where the input has several.
+
+    Separate polygons stay separate, because that is the area to clip to. ``one_polygon``
+    is what turns them into the single outline ASF's search takes.
 
     Takes WKT, a path to any vector file geopandas can read, a shapely geometry, a
     GeoDataFrame or GeoSeries, a GeoJSON-like mapping, a (west, south, east, north) box,
