@@ -103,9 +103,26 @@ def _plain(value):
         # NaN is never equal to itself, and json writes and reads it happily, so a digest
         # holding one would fail against a copy of itself.
         return "nan" if np.isnan(value) else round(value, 6)
-    if isinstance(value, (int, str, bool)) or value is None:
+    if isinstance(value, str):
+        return _wkt(value)
+    if isinstance(value, (int, bool)) or value is None:
         return value
     return str(value)
+
+
+def _wkt(value):
+    """An outline rounded to the centimetre, or the string unchanged if it is not one.
+
+    A footprint is worked out through a coordinate transform, and PROJ's last bit is not
+    the same on every platform: one digest recorded 39.09700465293075 and another
+    ...76, which is a difference of about a nanometre and would fail a golden file on
+    somebody else's machine forever.
+    """
+    if not value.startswith(("POLYGON", "MULTIPOLYGON")):
+        return value
+    import shapely.wkt
+
+    return shapely.wkt.dumps(shapely.wkt.loads(value), rounding_precision=7)
 
 
 def compare(name, found):
