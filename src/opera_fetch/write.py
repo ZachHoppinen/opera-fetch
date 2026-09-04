@@ -22,6 +22,9 @@ def write(obj, path, complevel=4):
     """Write a stack, or the several UTM zones of one, to path.
 
     The format follows the suffix: .nc and .h5 go through h5netcdf, .zarr through zarr.
+
+    Time is stored in seconds, which is the resolution OPERA acquisitions carry, so a
+    datetime64[ns] index reads back as datetime64[s]. The instants are unchanged.
     """
     path = Path(path)
     if path.suffix not in (".nc", ".h5", ".zarr"):

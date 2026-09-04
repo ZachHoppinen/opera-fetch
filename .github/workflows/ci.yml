@@ -8,7 +8,19 @@ on:
 
 jobs:
   test:
+    # Every Python the classifiers claim, plus one job held on pandas 2. The default
+    # datetime resolution changed in pandas 3, and testing only one side of that let a
+    # failure reach a release.
+    name: py${{ matrix.python }}${{ matrix.pins && format(' ({0})', matrix.pins) || '' }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13", "3.14"]
+        pins: [""]
+        include:
+          - python: "3.12"
+            pins: "pandas=2"
     defaults:
       run:
         shell: bash -l {0}
@@ -22,13 +34,20 @@ jobs:
       - uses: mamba-org/setup-micromamba@v2
         with:
           environment-file: environment.yml
-          # Cached on the environment.yml hash, so later runs skip the solve.
+          # environment.yml pins 3.12; the matrix overrides it here.
+          create-args: >-
+            python=${{ matrix.python }}
+            ${{ matrix.pins }}
           cache-environment: true
+          cache-environment-key: ${{ matrix.python }}-${{ matrix.pins }}-${{ hashFiles('environment.yml') }}
 
       - name: Install the development extras
         # environment.yml is the lean runtime env, so the test and build tools come
         # from the [develop] extra rather than being carried by every user.
         run: pip install -e ".[develop]"
+
+      - name: Versions under test
+        run: python -c "import sys, pandas, xarray, numpy; print(sys.version); print('pandas', pandas.__version__, 'xarray', xarray.__version__, 'numpy', numpy.__version__)"
 
       - name: Lint
         run: ruff check src/ tests/ scripts/
@@ -36,6 +55,21 @@ jobs:
       - name: Tests
         # Neither ASF nor granules on disk: this has to pass without a network.
         run: pytest -v -m "not network and not data"
+
+  package:
+    # Once, not per interpreter: the wheel is pure Python and does not vary.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: pip install build twine
 
       - name: Build package
         run: python -m build

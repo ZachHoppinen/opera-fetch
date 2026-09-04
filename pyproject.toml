@@ -32,6 +32,7 @@ dependencies = [
     "numpy",
     "pandas",
     "pyproj",
+    "rasterio",
     "requests",
     "rioxarray",
     "shapely",

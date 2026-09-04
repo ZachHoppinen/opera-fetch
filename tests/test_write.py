@@ -14,8 +14,11 @@ def test_a_stack_comes_back_exactly(tmp_path, suffix):
     back = read(path)
 
     assert np.array_equal(back.vv.values, burst.vv.values)
-    assert back.indexes["time"].equals(burst.indexes["time"])
     assert back.rio.crs == burst.rio.crs
+    # Same instants. Not the same dtype: time is stored in seconds, so a datetime64[ns]
+    # index comes back as datetime64[s]. OPERA acquisitions are second resolution.
+    assert np.array_equal(back.indexes["time"].astype("datetime64[s]"),
+                          burst.indexes["time"].astype("datetime64[s]"))
 
 
 @pytest.mark.parametrize("suffix", [".nc", ".zarr"])
