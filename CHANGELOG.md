@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- A date pandas reads as no date at all is refused rather than sent to ASF. `""` becomes
+  `NaT`, and asf_search takes a `NaT` without complaint: it reaches CMR as the literal
+  string `"NaT"` in the temporal parameter. Handed the `""` itself asf_search does raise,
+  so it was this conversion that laundered it. `None` is still how an open end is said.
 - Every static layer says what it is. Only the incidence angles were described; the others
   kept the GeoTIFF's own tags, all 69 of them, so `number_of_looks` carried OPERA's
   processing software version and the date it ran, and a `_FillValue` a reader turns back

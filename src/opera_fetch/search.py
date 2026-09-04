@@ -26,9 +26,17 @@ def as_dates(start=None, end=None):
         if value is None:
             return None
         try:
-            return pd.Timestamp(value)
+            read = pd.Timestamp(value)
         except Exception as err:
             raise ValueError(f"could not read {name} date from {value!r}") from err
+        if pd.isna(read):
+            # pandas reads "" as NaT rather than raising, and asf_search takes a NaT
+            # without complaint: it reaches CMR as the literal string "NaT" in the
+            # temporal parameter. Given the "" itself asf_search does raise, so it is this
+            # conversion that launders it, and this conversion that has to catch it.
+            raise ValueError(f"could not read {name} date from {value!r}. "
+                             "Pass None for an open-ended range")
+        return read
 
     start, end = stamp(start, "start"), stamp(end, "end")
     if start is not None and end is not None and start > end:

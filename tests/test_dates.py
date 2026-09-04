@@ -37,3 +37,18 @@ def test_a_range_entirely_before_the_opera_archive_says_so():
 def test_a_range_that_only_starts_early_is_allowed():
     start, end = as_dates("2015-01-01", "2020-01-01")
     assert start is not None and end is not None
+
+
+@pytest.mark.parametrize("value", ["", pd.NaT, float("nan")])
+def test_something_pandas_reads_as_no_date_is_refused(value):
+    """pandas reads "" as NaT rather than raising, and asf_search takes a NaT without
+    complaint: it reaches CMR as the literal string "NaT". Given the "" itself asf_search
+    does raise, so it is this conversion that launders it."""
+    with pytest.raises(ValueError, match="could not read start date"):
+        as_dates(value, "2024-11-30")
+    with pytest.raises(ValueError, match="could not read end date"):
+        as_dates("2024-11-01", value)
+
+
+def test_none_is_still_how_an_open_ended_range_is_said():
+    assert as_dates(None, None) == (None, None)
