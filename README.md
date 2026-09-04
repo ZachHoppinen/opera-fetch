@@ -61,78 +61,37 @@ Two entries because this AOI straddles a UTM zone boundary. Usually there is one
 
 ## Processing choices
 
-**Nothing is resampled by default.** OPERA delivers every burst on a fixed lattice in the UTM zone it
-falls in, so two bursts of one track, and the same burst reprocessed next year, share their
-pixel centres exactly. Mosaicking and clipping are coordinate lookups, so every value that
-comes out is a value that went in. Reprojecting is left to whatever comes next, which is
-the step that knows what it wants.
+**Nothing is resampled unless you ask.** OPERA delivers every burst on a fixed lattice in
+the UTM zone it falls in, so two bursts of one track, and the same burst reprocessed next
+year, share their pixel centres exactly. Mosaicking and clipping are therefore coordinate
+lookups: every value that comes out is a value that went in. `reproject_to` is the only
+resampling in the package, and it has to be asked for by name.
 
-### Returning a dictionary is how we avoid reprojections
-
-OPERA assigns the UTM zone **per burst**, so an AOI near a zone boundary can be covered by
-bursts in two zones. The same ground then has two different sets of x and y coordinates,
-and no single spatial grid holds both.
-
-So return a dictionary per EPSG in your AOI:
+**The grid is OPERA's own.** The lattice is read off the products rather than rebuilt from
+a rule about where OPERA snaps. OPERA assigns the UTM zone per burst, so an AOI near a zone
+boundary is covered by bursts in two zones, and the same ground then has two sets of x and
+y coordinates that no single grid holds. Rather than resample one of them away, the result
+is a dictionary keyed by EPSG. Usually it has one entry; a cross-zone AOI is the only thing
+that forces a second.
 
 ```
 {32612: <xarray.Dataset>, 32613: <xarray.Dataset>}
 ```
 
-**We return a dictionary so that nothing has to be reprojected.** Two UTM zones cannot share x and y
-coordinates, and forcing them to would mean resampling every pixel of one of them which especially
-for the CSLCs should be done carefully and potentially not at all.
-
-Usually there is a single entry, and a large cross-zone AOI is the only thing that forces a second.
-When it does, `reproject_to` can be used to put them on one grid and give back a single Dataset:
-
-```python
-stack = of.fetch_stacks(aoi, start, end, reproject_to="auto")          # one Dataset
-stack = of.fetch_stacks(aoi, start, end, reproject_to="EPSG:32613")    # if you care which
-```
-
-You may not know your UTM zone, so `"auto"` picks it: the
-zone the AOI actually lies in, which is the one that fits it with the least distortion.
-Data already in that UTM keeps the grid OPERA delivered, untouched, and the other zones move onto it. Where
-there is only one zone, which is the usual case, `"auto"` resamples nothing at all and
-simply hands back that Dataset.
-
-It finds that zone as the delivered zone whose central meridian is nearest the middle of
-the AOI. Zones are six degree bands about those meridians, so this is the zone containing
-the AOI whenever OPERA delivered that zone, and the nearest fit when every burst happened
-to land in a neighbour.
-
-`reproject_to` is the only resampling in the package, which is why it has to be asked for
-by name.
-
-We make the following reprojection choices. A mask is categorical, so it always moves by
-nearest. Real layers take `nearest` by default, which moves values without inventing any,
-and `resampling=` overrides that with any name from `rasterio.enums.Resampling`.
-
-**Nearest for real layers is a trade, not a clear win.** Neighbouring UTM lattices do not
-line up. Putting the East River zone 12 grid into zone 13 leaves every pixel centre a median
-12 m, and up to 21 m, from the nearest source centre on a 30 m grid, and it is a rotation
-and a slight scale change rather than a shift. So nearest returns a real observed gamma0
-with its speckle statistics intact, but attributes it to a cell up to two thirds of a pixel
-away. Bilinear puts it in the right place and removes 42% of the variance. Nearest is the
-default because it invents nothing, not because the error is small.
-
-Two things to know before overriding it. `cubic` and `lanczos` have negative lobes and
-produce negative gamma0, 0.12% and 0.35% of cells on that scene; gamma0 is a power ratio,
-so `10*log10` gives NaN there. And the oversampling used for CSLC does not transfer: gamma0
-is detected rather than complex, so it is not bandlimited to its own grid, and zero padding
-its spectrum also gives negatives.
-
-**A complex layer is sinc interpolated**, the same family OPERA geocodes complex data with.
-It happens in two steps rather than through a kernel. The layer is oversampled eight times over by zero padding its
-spectrum and the fine sample is then read directly.
-
-**The lattice is taken from the OPERA products themselves.** We return on a UTM grid using the opera design.
+**What comes back is xarray, and nothing else.** A `Dataset` per zone, dimensions
+`(time, y, x)`, one layer per variable, dask-backed so a season is not read until it is
+used, with the CRS where rioxarray keeps it. Track, direction, platform and orbit are
+coordinates on the time axis rather than keys in a structure of ours, so selecting a track
+is `stack.sel(time=stack.track == 49)`. There is no container of ours to learn.
 
 ### What it refuses
 
 Four things raise rather than returning something quietly wrong:
 
+- **An AOI whose coordinates are not lon/lat.** ASF clamps a latitude past 90 rather than
+  complaining, which degenerates the polygon and returns nothing, so a transposed pair or a
+  forgotten `aoi_crs` reads as an empty archive. A box with south above north is refused
+  too, where `shapely.box` quietly swaps them.
 - **An AOI across the antimeridian.** Left alone, `box(179.5, 51.5, -179.5, 52)` becomes
   the whole world except that box, and the search returns thousands of granules. Split it
   at 180 and assemble each side; they are in different zones anyway.
@@ -142,6 +101,43 @@ Four things raise rather than returning something quietly wrong:
   about half the usual acquisitions.
 - **A resampling name GDAL will not apply to complex data**, the quantiles among them,
   which have no meaning for a complex number. GDAL raises those itself.
+
+## Reprojection, if you ask for it
+
+```python
+stack = of.fetch_stacks(aoi, start, end, reproject_to="auto")          # one Dataset
+stack = of.fetch_stacks(aoi, start, end, reproject_to="EPSG:32613")    # if you care which
+```
+
+`"auto"` picks the zone the AOI lies in, found as the delivered zone whose central meridian
+is nearest the middle of the AOI. Data already in that zone keeps the grid OPERA delivered
+and only the other zones move. With one zone, the usual case, `"auto"` resamples nothing.
+
+A mask is categorical and always moves by nearest. Real layers take `nearest` by default,
+overridden with `resampling=` and any name from `rasterio.enums.Resampling`. A complex
+layer takes neither: it is oversampled eight times over by zero padding its spectrum, which
+is exact, and the fine sample read directly, the same sinc family OPERA geocodes complex
+data with.
+
+**Nearest for real layers is a trade, not a clear win.** Neighbouring UTM lattices do not
+line up. Putting the East River zone 12 grid into zone 13 leaves every pixel centre a median
+12 m, and up to 21 m, from the nearest source centre on a 30 m grid, as a rotation and a
+slight scale change rather than a shift. Nearest returns a real observed gamma0 with its
+speckle statistics intact and attributes it to a cell up to two thirds of a pixel away;
+bilinear puts it in the right place and removes 42% of the variance. Nearest is the default
+because it invents nothing, not because the error is small.
+
+Two things before overriding it. `cubic` and `lanczos` have negative lobes and produce
+negative gamma0, 0.12% and 0.35% of cells on that scene, and gamma0 is a power ratio, so
+`10*log10` gives NaN there. And the oversampling used for CSLC does not transfer: gamma0 is
+detected rather than complex, so it is not bandlimited to its own grid and zero padding its
+spectrum also gives negatives.
+
+Where bursts carry `number_of_looks` they are averaged in proportion to it, so a cell only
+one burst reaches still goes through the weighted average, and `(w * x) / w` is not always
+`x` in float32: about a tenth of such cells come back within one unit in the last place, a
+relative 2e-7. No value moves and nothing is interpolated; that last bit is the arithmetic
+of averaging a single number.
 
 ## Products
 
