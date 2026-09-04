@@ -16,6 +16,7 @@ import xarray as xr
 from pyproj import CRS, Transformer
 from shapely.ops import transform as shapely_transform
 
+from opera_fetch import constants as const
 from opera_fetch.aoi import WGS84, as_geometry
 
 log = logging.getLogger(__name__)
@@ -139,10 +140,42 @@ def clip(obj, aoi, crs=None, mask=False):
 
     cut = place(obj, grid_like([obj], bounds=geometry.bounds))
     if mask:
-        cut = cut.rio.clip([geometry], target, drop=False)
+        # Told what no observation means, rioxarray blanks the corners with it. Left to
+        # work it out, it filled the layover mask with 0, which is the code for clear.
+        cut = _mask_nodata_declared(cut).rio.clip([geometry], target, drop=False)
+        cut = mask_codes(cut)
 
     log.debug("clipped to %d by %d cells", cut.sizes["y"], cut.sizes["x"])
     return cut
+
+
+def mask_codes(obj):
+    """A copy whose layover masks are integers again.
+
+    Anything that fills floats an integer mask, and a class code is not a float. Those
+    cells are no observation, which the mask already has a code for.
+    """
+    if not isinstance(obj, xr.Dataset):
+        return obj
+    product = obj.attrs.get("product", const.RTC)
+    out = obj.copy()
+    for name, array in out.data_vars.items():
+        if name.endswith("mask") and array.dtype.kind == "f":
+            out[name] = (array.fillna(const.MASK_NODATA[product])
+                         .astype(const.MASK_DTYPE[product]))
+    return out
+
+
+def _mask_nodata_declared(obj):
+    """A copy whose layover masks say which code means no observation."""
+    if not isinstance(obj, xr.Dataset):
+        return obj
+    nodata = const.MASK_NODATA[obj.attrs.get("product", const.RTC)]
+    out = obj.copy()
+    for name, array in out.data_vars.items():
+        if name.endswith("mask") and array.rio.nodata is None:
+            out[name] = array.rio.write_nodata(nodata)
+    return out
 
 
 def reproject(geometry, crs):

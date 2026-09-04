@@ -165,3 +165,22 @@ def test_a_spacing_that_matches_the_coordinates_is_quiet(caplog):
     with caplog.at_level(logging.WARNING, logger="opera_fetch.grid"):
         assert spacing_of(make_burst(west=500_010, north=4_332_210)) == (30.0, 30.0)
     assert caplog.text == ""
+
+
+def test_clipping_to_a_polygon_does_not_invent_a_clear_pixel():
+    """rioxarray blanks with the array's nodata, and an undeclared nodata is 0, which in
+    the layover mask means clear. A cut corner is no observation, not good ground."""
+    from shapely.geometry import box
+
+    from opera_fetch.grid import clip
+
+    stack = make_burst(west=500_010, north=4_332_210, columns=8, rows=6)
+    stack["mask"][:] = 0
+    stack["mask"][:, 2, 1] = 1                      # layover, inside the polygon
+    inside = box(500_010, 4_332_210 - 4 * 30, 500_010 + 4 * 30, 4_332_210)
+
+    cut = clip(stack, inside, crs="EPSG:32612", mask=True)
+
+    assert cut["mask"].dtype == np.uint8, "a class code is not a float"
+    assert int((cut["mask"].values == 1).sum()) == 2, "the layover pixels are kept"
+    assert 255 in np.unique(cut["mask"].values), "the corners say no observation"

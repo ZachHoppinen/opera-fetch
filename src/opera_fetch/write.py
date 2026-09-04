@@ -82,13 +82,27 @@ def _groups_in(path):
 
 STORABLE = (str, bytes, int, float, np.number, np.ndarray)
 
+# The only encoding carried into the file. Everything else a reader leaves behind there is
+# either rejected by the backend outright, which is what made a stack from read()
+# unwritable, or silently re-encodes the values: a dtype and a scale factor from another
+# format, a chunk layout belonging to one, a fill value CF decoding turns into NaN.
+CARRIED = ("grid_mapping",)
+
 
 def _clean(stack):
-    """A copy whose attributes a file format can hold."""
+    """A copy whose attributes and encoding a file format can hold.
+
+    The mask's nodata is declared where something is about to fill with it and stripped
+    here. Written down, CF decoding reads 255 back as a gap, so the mask returns as float
+    with NaN where the code for no observation was.
+    """
     stack = stack.copy()
     stack.attrs = _storable(stack.attrs)
     for name in stack.variables:
         stack[name].attrs = _storable(stack[name].attrs)
+        stack[name].attrs.pop("_FillValue", None)
+        stack[name].encoding = {key: value for key, value in stack[name].encoding.items()
+                                if key in CARRIED}
     return stack
 
 

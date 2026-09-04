@@ -23,7 +23,7 @@ from opera_fetch import constants as const
 from opera_fetch import cslc, filenames, rtc
 from opera_fetch.aoi import as_geometry
 from opera_fetch.errors import NoAcquisitions
-from opera_fetch.grid import clip, reproject
+from opera_fetch.grid import clip, mask_codes, reproject
 from opera_fetch.mosaic import TOLERANCE, align_passes, mosaic
 from opera_fetch.search import _listed
 
@@ -361,13 +361,8 @@ def _onto_one_crs(stacks, crs, resampling=None):
     # another zone's, so they have to concatenate rather than be taken as one.
     joined = xr.concat(moved, dim="time", join="outer", data_vars="all").sortby("time")
 
-    # Reprojecting floats a mask wherever a cell has no source, and a class code is not a
-    # float. Those cells are no observation, which the mask already has a code for.
-    product = joined.attrs.get("product", const.RTC)
-    for name in joined.data_vars:
-        if name.endswith("mask") and joined[name].dtype.kind == "f":
-            joined[name] = (joined[name].fillna(const.MASK_NODATA[product])
-                            .astype(const.MASK_DTYPE[product]))
+    # Reprojecting floats a mask wherever a cell has no source.
+    joined = mask_codes(joined)
 
     joined.attrs = _across_zones([stacks[epsg] for epsg in sorted(stacks)])
     joined.attrs.update(epsg=target.to_epsg(), reprojected_from=sorted(stacks))

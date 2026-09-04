@@ -24,6 +24,20 @@ answer.
   difference.
 - `xr.concat` in the reprojection path pins `data_vars="all"`, which is what it needs and
   what xarray is about to stop defaulting to.
+- `rtc.read_burst` checks the burst ID over the static layers too, not only over the
+  acquisitions. A static joins by grid, and the neighbouring burst of the same track is on
+  that grid, so the wrong burst's incidence angle was attached under the right name and
+  40% NaN. `cslc.read_burst` already had the check.
+- `clip(mask=True)` declares the mask's no-observation code before rioxarray blanks the
+  corners with it. Undeclared it filled with 0, which is the code for clear, relabelling
+  layover, shadow and no-observation pixels as good ground.
+- `write` carries only the grid mapping out of a variable's encoding. Everything else a
+  reader leaves there is either rejected by the backend, which made a stack from `read`
+  unwritable, or silently re-encodes the values. `_FillValue` is stripped from the
+  attributes for the same reason: written down, CF decoding reads 255 back as a gap and
+  the mask returns as float with NaN where the class code was.
+- The mask-code convention is one function, `grid.mask_codes`, rather than a loop repeated
+  wherever something fills.
 
 ## 0.1.0
 

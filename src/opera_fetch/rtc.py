@@ -36,6 +36,13 @@ def read_burst(paths, chunks=CHUNK):
     products are ignored; files of another burst are an error rather than a quiet drop.
     """
     paths = [p for p in paths if filenames.parse_product(p) in (const.RTC, const.RTC_STATIC)]
+    # Over the statics too, not just the acquisitions: a static layer joins by grid, and
+    # the neighbouring burst of the same track is on that grid. Nothing downstream would
+    # notice the wrong burst's incidence angle.
+    bursts = {filenames.parse_burst_id(path) for path in paths}
+    if len(bursts) > 1:
+        raise ValueError(f"paths span {len(bursts)} bursts: {sorted(bursts)}. Group them first")
+
     granules = _granules(paths)
     if not granules:
         raise NoAcquisitions("no OPERA RTC acquisitions among the given paths")
@@ -107,10 +114,6 @@ def _granules(paths):
         # The granule is the name with "_<layer>" taken off the end.
         granule = Path(path).stem.removesuffix(f"_{layer}")
         granules[granule][layer] = path
-
-    bursts = {filenames.parse_burst_id(granule) for granule in granules}
-    if len(bursts) > 1:
-        raise ValueError(f"paths span {len(bursts)} bursts: {sorted(bursts)}. Group them first")
     return dict(granules)
 
 def identify(tags):

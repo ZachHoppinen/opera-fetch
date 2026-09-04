@@ -529,10 +529,9 @@ def test_a_track_can_be_picked_out_of_a_cache():
 
 def test_a_filter_that_matches_nothing_says_what_was_there():
     """Silently returning an empty stack would look like an empty date range."""
+    import opera_fetch.stack as stack_module
     from opera_fetch.errors import NoAcquisitions
     from opera_fetch.stack import assemble
-
-    import opera_fetch.stack as stack_module
 
     def one_ascending_burst(paths, **kwargs):
         return [make_burst(west=500_010, north=4_332_210, track=49, direction="ASCENDING")]
@@ -544,3 +543,19 @@ def test_a_filter_that_matches_nothing_says_what_was_there():
             assemble([RTC], track=56)
     finally:
         stack_module.read_bursts = original
+
+
+def test_a_static_layer_from_another_burst_is_refused():
+    """The static join is by grid, and the neighbouring burst of the same track is on that
+    grid. Accepted, it puts a 40% NaN incidence angle on the stack under the right name."""
+    from opera_fetch.rtc import read_burst
+
+    other = ("OPERA_L2_RTC-S1-STATIC_T049-103328-IW3_20140403_S1A_30_v1.0"
+             "_local_incidence_angle.tif")
+    with pytest.raises(ValueError, match="span 2 bursts"):
+        read_burst([RTC, other])
+
+    # The burst's own static is not refused; it gets as far as opening the file.
+    with pytest.raises(Exception) as caught:
+        read_burst([RTC, STATIC])
+    assert "span" not in str(caught.value)

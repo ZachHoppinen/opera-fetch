@@ -60,3 +60,37 @@ def test_attributes_a_file_cannot_hold_are_turned_into_text(tmp_path):
 def test_an_unknown_suffix_says_what_it_takes(tmp_path):
     with pytest.raises(ValueError, match=r"\.nc, \.h5 or \.zarr"):
         write(make_burst(west=500_010, north=4_332_210), tmp_path / "stack.tif")
+
+
+@pytest.mark.parametrize("suffix", [".nc", ".zarr"])
+def test_a_stack_that_came_from_read_can_be_written_again(tmp_path, suffix):
+    """A reader leaves its own encoding behind: a chunk layout, a dtype, a fill value.
+    Splatted into the next write, h5netcdf rejects keys it has never heard of and the
+    package cannot re-write its own file."""
+    burst = make_burst(west=500_010, north=4_332_210)
+    once = read(write(burst, tmp_path / f"once{suffix}"))
+
+    twice = read(write(once, tmp_path / f"twice{suffix}"))
+    assert np.array_equal(twice.vv.values, burst.vv.values)
+    assert twice.rio.crs == burst.rio.crs
+
+    # And across formats, whose encodings have nothing in common.
+    other = ".zarr" if suffix == ".nc" else ".nc"
+    assert read(write(once, tmp_path / f"across{other}")).rio.crs == burst.rio.crs
+
+
+@pytest.mark.parametrize("suffix", [".nc", ".zarr"])
+def test_a_declared_mask_nodata_does_not_come_back_as_a_gap(tmp_path, suffix):
+    """The reprojection path declares 255 so GDAL will not invent a code. Written down,
+    CF decoding reads it back as NaN and the whole mask returns as float."""
+    import rioxarray  # noqa: F401  registers the .rio accessor
+
+    burst = make_burst(west=500_010, north=4_332_210)
+    burst["mask"][:] = 0
+    burst["mask"][:, 0, 0] = 255
+    burst["mask"] = burst["mask"].rio.write_nodata(255)
+
+    back = read(write(burst, tmp_path / f"mask{suffix}"))
+
+    assert back["mask"].dtype == np.uint8
+    assert sorted(np.unique(back["mask"].values).tolist()) == [0, 255]
