@@ -31,10 +31,14 @@ jobs:
           # Full history and tags, so setuptools-scm can derive the version.
           fetch-depth: 0
 
+      - name: Environment file for this interpreter
+        # environment.yml pins python=3.12 for users. A second python spec conflicts with
+        # that rather than overriding it, so the pin comes out and the matrix chooses.
+        run: grep -v '^ *- python=' environment.yml > /tmp/matrix-env.yml
+
       - uses: mamba-org/setup-micromamba@v2
         with:
-          environment-file: environment.yml
-          # environment.yml pins 3.12; the matrix overrides it here.
+          environment-file: /tmp/matrix-env.yml
           create-args: >-
             python=${{ matrix.python }}
             ${{ matrix.pins }}
