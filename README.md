@@ -67,6 +67,11 @@ pixel centres exactly. Mosaicking and clipping are coordinate lookups, so every 
 comes out is a value that went in. Reprojecting is left to whatever comes next, which is
 the step that knows what it wants.
 
+Where bursts carry `number_of_looks`, a cell only one burst reaches still goes through the
+weighted average, and `(w * x) / w` is not always `x` in float32: about a tenth of such
+cells come back within one unit in the last place, a relative 2e-7. Nothing is interpolated
+and no value moves; the arithmetic of averaging one number is where that last bit goes.
+
 The lattice is taken from the OPERA products themselves.
 
 ### Returning a dictionary is how we avoid reprojections

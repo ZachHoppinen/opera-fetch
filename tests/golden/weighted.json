@@ -1,0 +1,142 @@
+{
+  "attrs": {
+    "burst_id": "T049-103327-IW3, T049-103328-IW3",
+    "bursts": 2,
+    "direction": "ASCENDING",
+    "epsg": 32612,
+    "footprint": "POLYGON ((-107.9939254 39.0997579, -107.9940401 39.0970583, -107.9971582 39.0971387, -108.0002762 39.0972191, -108.0001617 39.0999187, -107.9980829 39.0998651, -107.9980829 39.0998652, -107.9970436 39.0998384, -107.9960042 39.0998116, -107.9960042 39.0998116, -107.9939254 39.0997579))",
+    "granules": "OPERA_L2_RTC-S1_T049-103327-IW3_20241004T011054Z_20241004T043235Z_S1A_30_v1.0\nOPERA_L2_RTC-S1_T049-103327-IW3_20241016T011054Z_20241016T043235Z_S1A_30_v1.0\nOPERA_L2_RTC-S1_T049-103328-IW3_20241004T011054Z_20241004T043235Z_S1A_30_v1.0\nOPERA_L2_RTC-S1_T049-103328-IW3_20241016T011054Z_20241016T043235Z_S1A_30_v1.0",
+    "product": "RTC",
+    "product_version": "1.0",
+    "spacing": [
+      30.0,
+      30.0
+    ],
+    "track": 49,
+    "tracks": [
+      49
+    ]
+  },
+  "bounds": [
+    759420.0,
+    4331850.0,
+    759960.0,
+    4332150.0
+  ],
+  "coords": {
+    "absolute_orbit": [
+      55893,
+      55893
+    ],
+    "direction": [
+      "ASCENDING",
+      "ASCENDING"
+    ],
+    "platform": [
+      "S1A",
+      "S1A"
+    ],
+    "time": [
+      "2024-10-04T01:10:54",
+      "2024-10-16T01:10:54"
+    ],
+    "track": [
+      49,
+      49
+    ]
+  },
+  "crs": 32612,
+  "sizes": {
+    "time": 2,
+    "x": 18,
+    "y": 10
+  },
+  "spacing": [
+    30.0,
+    30.0
+  ],
+  "variables": {
+    "local_incidence_angle": {
+      "attrs": {
+        "long_name": "local incidence angle",
+        "units": "radians"
+      },
+      "dims": [
+        "y",
+        "x"
+      ],
+      "dtype": "float32",
+      "hash": "ddb5f19dd234808d",
+      "observed": 180,
+      "range": [
+        0.1831,
+        0.3908
+      ]
+    },
+    "mask": {
+      "attrs": {
+        "flag_meanings": "0 clear, 1 shadow, 2 layover, 3 both, 255 no observation",
+        "long_name": "layover and shadow mask",
+        "units": "1"
+      },
+      "codes": {
+        "0": 54,
+        "1": 54,
+        "2": 108,
+        "255": 36,
+        "3": 108
+      },
+      "dims": [
+        "time",
+        "y",
+        "x"
+      ],
+      "dtype": "uint8",
+      "hash": "f408d608bfbb4aa2"
+    },
+    "number_of_looks": {
+      "attrs": {
+        "ABSOLUTE_ORBIT_NUMBER": 0,
+        "AREA_OR_POINT": "Area",
+        "BOUNDING_POLYGON": "POLYGON ((-108.0002762 39.0972191, -107.9961188 39.0971119, -107.9960042 39.0998116, -108.0001617 39.0999187, -108.0002762 39.0972191))",
+        "BURST_ID": "T049-103327-IW3",
+        "ORBIT_PASS_DIRECTION": "ASCENDING",
+        "PLATFORM": "Sentinel-1A",
+        "PRODUCT_VERSION": 1.0,
+        "TRACK_NUMBER": 49,
+        "ZERO_DOPPLER_START_TIME": "2014-04-03T00:00:00Z",
+        "add_offset": 0.0,
+        "scale_factor": 1.0
+      },
+      "dims": [
+        "y",
+        "x"
+      ],
+      "dtype": "float32",
+      "hash": "9b6f28500acbda80",
+      "observed": 180,
+      "range": [
+        1.0,
+        5.0
+      ]
+    },
+    "vv": {
+      "attrs": {
+        "long_name": "VV gamma0, linear power",
+        "units": "1"
+      },
+      "dims": [
+        "time",
+        "y",
+        "x"
+      ],
+      "dtype": "float32",
+      "hash": "0efee29c84151318",
+      "observed": 360,
+      "range": [
+        107327.0,
+        119328.6094
+      ]
+    }
+  }
+}

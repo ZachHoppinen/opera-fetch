@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+Found by reading the same granules with sarvalanche, which implements the OPERA RTC read
+independently: it reprojects every granule onto a reference grid and stacks the files
+where this package mosaics onto the grid OPERA delivered. Put on the same grid, the two
+agree bit for bit on the values, on every mask code, and on the mean over an overlap. They
+disagreed about the looks.
+
+- A burst counts its looks towards a mosaicked pixel only where it observed something. A
+  burst's static layers span its whole footprint while the acquisition carries nodata over
+  layover, shadow and the edge of the swath, and `number_of_looks` was summed over every
+  burst that reached a cell. Over a real three-burst T056 pass that came out a median of
+  two times too high on 53% of the mosaic, up to three times, which is a noise floor
+  computed from those looks reading too low by the square root of that. The backscatter
+  was always right: the weighted mean renormalizes over what is finite.
+- The README said every value that comes out is a value that went in, without saying that
+  a cell reached by one burst still goes through the weighted average, where `(w * x) / w`
+  loses a last bit in float32 about a tenth of the time: a relative 2e-7, measured. No
+  value moves and nothing is interpolated; it is the arithmetic of averaging one number.
+
 ## 0.2.1
 
 Fixes a crash in 0.2.0 on the path a downstream package takes unconditionally:

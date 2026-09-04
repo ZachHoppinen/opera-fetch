@@ -130,10 +130,15 @@ def _mean(placed):
         typical = looks.mean(dim="burst", skipna=True)
         weights = looks.fillna(typical).fillna(1.0)
         combined = data.drop_vars(const.LOOKS).weighted(weights).mean(dim="burst")
-        # The looks behind a mosaicked pixel are all the looks that went into it.
+        # The looks behind a mosaicked pixel are the looks of the bursts that delivered a
+        # value there, not of every burst whose static layer reaches it. A burst covers
+        # more ground than it observes, and counted by footprint the layer came out a
+        # median of two times too high over a real three-burst pass, which is a noise
+        # floor half what it should be.
         # min_count so a cell no burst knows stays unknown: summing nothing gives 0, and
         # zero looks is a real value that means something else entirely.
-        combined[const.LOOKS] = looks.sum(dim="burst", skipna=True, min_count=1)
+        combined[const.LOOKS] = looks.where(_delivered(data)).sum(
+            dim="burst", skipna=True, min_count=1)
     else:
         log.debug("no %s layer, so bursts are averaged flat", const.LOOKS)
         combined = data.mean(dim="burst", skipna=True)
@@ -152,6 +157,24 @@ def _mean(placed):
         worst = codes.max(dim="burst")
         combined[name] = worst.where(worst >= 0, nodata).astype(const.MASK_DTYPE[product])
     return _keep_attrs(combined, placed[0])
+
+
+def _delivered(data):
+    """Where each burst actually observed something, as (burst, y, x).
+
+    Read from the per-acquisition layers, since a static layer spans the whole burst
+    whether or not the radar returned anything from a given cell. Collapsed over time
+    because the looks layer does not vary in time either: what a burst can see is fixed
+    by its geometry, so the dates of one burst agree about this to within nothing.
+    """
+    timed = [name for name in data.data_vars
+             if name != const.LOOKS and "time" in data[name].dims]
+    if not timed:
+        return True
+    seen = np.isfinite(data[timed[0]])
+    for name in timed[1:]:
+        seen = seen | np.isfinite(data[name])
+    return seen.any("time") if "time" in seen.dims else seen
 
 
 def _first(placed):

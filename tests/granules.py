@@ -24,18 +24,21 @@ COLUMNS, ROWS = 12, 10
 
 
 def write_granule(directory, burst_id, acquired, processed, layers=("VV", "mask"),
-                  epsg=32612, column=0, track=49, direction="ASCENDING", orbit=55_893):
+                  epsg=32612, column=0, track=49, direction="ASCENDING", orbit=55_893,
+                  blind=False):
     """One acquisition of one burst, as the several files ASF delivers it in.
 
-    column offsets the burst east by a whole grid width, which is how two bursts of one
-    track sit next to each other on the same lattice.
+    column offsets the burst east by that many grid widths, so 1 abuts the burst before it
+    and 0.5 overlaps it by half. blind puts nodata over the western half of the
+    backscatter, which is what layover, shadow and the edge of a swath look like: ground
+    the burst covers and did not observe.
     """
     written = []
     for layer in layers:
         name = (f"OPERA_L2_RTC-S1_{burst_id}_{acquired}Z_{processed}Z"
                 f"_S1A_30_v1.0_{layer}.tif")
         written.append(_write(directory / name, layer, burst_id, acquired, epsg, column,
-                              track, direction, orbit))
+                              track, direction, orbit, blind))
     return written
 
 
@@ -44,12 +47,12 @@ def write_static(directory, burst_id, layer="local_incidence_angle", epsg=32612,
     """The once-per-burst layer, which carries no acquisition time."""
     name = f"OPERA_L2_RTC-S1-STATIC_{burst_id}_20140403_S1A_30_v1.0_{layer}.tif"
     return _write(directory / name, layer, burst_id, "20140403T000000", epsg, column,
-                  track, direction, 0)
+                  track, direction, 0, blind=False)
 
 
-def _write(path, layer, burst_id, acquired, epsg, column, track, direction, orbit):
+def _write(path, layer, burst_id, acquired, epsg, column, track, direction, orbit, blind):
     west, north = ANCHOR[epsg]
-    west += column * COLUMNS * SPACING
+    west += round(column * COLUMNS) * SPACING
 
     # A value that says where it came from: the burst, the day and the cell. Nothing here
     # is constant, so a value that has moved is a value that shows up as moved.
@@ -61,6 +64,11 @@ def _write(path, layer, burst_id, acquired, epsg, column, track, direction, orbi
         values = (cells % 4).astype("uint8")
         values[0, :] = const.MASK_NODATA[const.RTC]
         dtype = "uint8"
+    elif layer == "number_of_looks":
+        # Per burst, and the looks a mosaicked pixel reports are what a noise floor is
+        # worked out from, so a burst counted where it observed nothing halves it.
+        values = np.full((ROWS, COLUMNS), 1.0 + column * 8.0, dtype="float32")
+        dtype = "float32"
     elif layer == "local_incidence_angle":
         # Per track, because two tracks see the ground from different angles. Made the
         # same for every burst, the layer is one band for a whole zone however many
@@ -69,6 +77,10 @@ def _write(path, layer, burst_id, acquired, epsg, column, track, direction, orbi
         dtype = "float32"
     else:
         values = (signature + cells / 1000.0).astype("float32")
+        if blind:
+            # Ground the burst reaches and did not observe. Its static layers still span
+            # it, which is what made the mosaicked look count too high.
+            values[:, :COLUMNS // 2] = np.nan
         dtype = "float32"
 
     with rasterio.open(path, "w", driver="GTiff", height=ROWS, width=COLUMNS, count=1,

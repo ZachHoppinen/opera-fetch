@@ -205,6 +205,25 @@ def mixed_zones(tmp_path):
 
 
 @pytest.fixture
+def weighted(tmp_path):
+    """Two bursts that overlap, each carrying its own look count.
+
+    The looks-weighted branch of the mosaic, which nothing else here reaches: a burst that
+    covers a cell but observed nothing there must not count its looks towards it.
+    """
+    paths = []
+    for acquired, processed in ACQUISITIONS:
+        paths += write_granule(tmp_path, "T049-103327-IW3", acquired, processed)
+        # Overlapping by half, and the second observes nothing over the half it shares.
+        paths += write_granule(tmp_path, "T049-103328-IW3", acquired, processed,
+                               column=0.5, blind=True)
+    for burst, column in (("T049-103327-IW3", 0), ("T049-103328-IW3", 0.5)):
+        for layer in ("local_incidence_angle", "number_of_looks"):
+            paths.append(write_static(tmp_path, burst, layer=layer, column=column))
+    return [str(p) for p in paths]
+
+
+@pytest.fixture
 def one_track(tmp_path):
     """Two bursts of one track abutting on one lattice, twice over, with their statics.
 
@@ -233,6 +252,14 @@ def test_taking_the_first_burst_gives_the_same_mosaic_it_always_has(one_track):
 
     assert stack[32612]["mask"].dtype == np.uint8
     compare("first", digest(stack[32612], exact=True))
+
+
+def test_the_looks_weighted_mosaic_stays_what_it_was(weighted):
+    """A cell only one burst observed reports that burst's looks and no more."""
+    stack = assemble(weighted)[32612]
+
+    assert "number_of_looks" in stack.data_vars
+    compare("weighted", digest(stack, exact=True))
 
 
 def test_a_reprocessed_granule_replaces_the_one_it_supersedes(tmp_path):

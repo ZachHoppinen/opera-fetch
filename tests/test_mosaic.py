@@ -198,3 +198,27 @@ def test_taking_the_first_burst_leaves_the_mask_an_integer():
 
     assert merged["mask"].dtype == np.uint8
     assert set(np.unique(merged["mask"].values).tolist()) <= {0, 1, 2, 3, 255}
+
+
+def test_a_burst_counts_its_looks_only_where_it_observed_something():
+    """A burst covers more ground than it observes: its static layers span the whole
+    footprint while the acquisition has nodata over layover, shadow and the edges. Counted
+    by footprint, a real three-burst pass reported a median of twice the looks it had,
+    which is a noise floor half what it should be."""
+    from opera_fetch.mosaic import mosaic
+
+    a = make_burst(west=500_010, north=4_332_210, columns=8, rows=4, times=1, fill=4.0)
+    b = make_burst(west=500_010, north=4_332_210, columns=8, rows=4, times=1, fill=100.0)
+    b.attrs["burst_id"] = "T049-103328-IW3"
+    a["number_of_looks"] = (("y", "x"), np.full((4, 8), 1.0, dtype="float32"))
+    b["number_of_looks"] = (("y", "x"), np.full((4, 8), 9.0, dtype="float32"))
+    b["vv"][:, :, 4:] = np.nan          # b reaches the right half and observes nothing
+
+    merged = mosaic([a, b])
+    looks = merged["number_of_looks"]
+
+    assert float(looks[0, 0]) == 10.0, "both bursts observed here, so both count"
+    assert float(looks[0, 6]) == 1.0, "only a observed here, and a has one look"
+    # The values were always right: xarray renormalizes the weights over what is finite.
+    assert float(merged.vv[0, 0, 0]) == pytest.approx((1 * 4.0 + 9 * 100.0) / 10)
+    assert float(merged.vv[0, 0, 6]) == pytest.approx(4.0)
