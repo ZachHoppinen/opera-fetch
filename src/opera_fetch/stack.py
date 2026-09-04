@@ -231,12 +231,20 @@ def _stacked_in_time(parts, join):
     grew one track at a time holds static layers for one track and not the other, and
     VV+VH alongside HH+HV is a configuration constants.LAYERS names.
     """
+    # A name is timed if any part has it timed, and static only if no part does. One zone
+    # holding two tracks whose look geometry disagrees already gave its incidence angle a
+    # time axis, and the zone beside it did not: classified per part rather than per name,
+    # that layer went down both branches and the static one expanded a dimension it had.
     timed, static = [], []
     for part in parts:
         for name, array in part.data_vars.items():
-            into = timed if "time" in array.dims else static
-            if name not in into:
-                into.append(name)
+            if "time" in array.dims:
+                if name in static:
+                    static.remove(name)
+                if name not in timed:
+                    timed.append(name)
+            elif name not in timed and name not in static:
+                static.append(name)
 
     absent = sorted({name for name in timed + static
                      for part in parts if name not in part.data_vars})
@@ -244,8 +252,7 @@ def _stacked_in_time(parts, join):
         log.warning("%s not in every pass; where absent the stack holds no observation",
                     ", ".join(absent))
 
-    stack = xr.concat([part[[name for name in timed if name in part.data_vars]]
-                       for part in parts],
+    stack = xr.concat([_timed(part, timed) for part in parts],
                       dim="time", join=join, data_vars="all",
                       combine_attrs="drop_conflicts")
 
@@ -269,6 +276,19 @@ def _stacked_in_time(parts, join):
     # Both branches above fill: an outer join where a pass is short, a reindex where a
     # static layer is. A class code is not a float, and NaN is not one of OPERA's codes.
     return mask_codes(stack)
+
+
+def _timed(part, names):
+    """One part's share of the layers that vary in time, every one of them on that axis.
+
+    A layer this part holds once but another part holds per acquisition is broadcast along
+    this part's own times, which is what it means: within this part it does not vary.
+    """
+    chosen = part[[name for name in names if name in part.data_vars]]
+    for name in chosen.data_vars:
+        if "time" not in chosen[name].dims:
+            chosen[name] = chosen[name].expand_dims(time=part.time)
+    return chosen
 
 
 def _one_zone(passes, epsg):

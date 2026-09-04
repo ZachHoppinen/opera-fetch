@@ -182,6 +182,29 @@ def two_zones(tmp_path):
 
 
 @pytest.fixture
+def mixed_zones(tmp_path):
+    """One zone holding two tracks, beside a zone holding one.
+
+    The shape a cache grows into, and the one that crashed 0.2.0: two tracks see the
+    ground from different angles, so the zone that holds both gives its incidence angle a
+    time axis, and the zone beside it does not.
+    """
+    paths = []
+    for acquired, processed in ACQUISITIONS:
+        paths += write_granule(tmp_path, "T049-103327-IW3", acquired, processed, epsg=32612)
+        paths += write_granule(tmp_path, "T129-275777-IW1", acquired, processed, epsg=32612,
+                               track=129, direction="DESCENDING")
+        paths += write_granule(tmp_path, "T056-118980-IW2", acquired, processed, epsg=32613,
+                               track=56, direction="DESCENDING")
+    for burst, epsg, track, direction in (("T049-103327-IW3", 32612, 49, "ASCENDING"),
+                                          ("T129-275777-IW1", 32612, 129, "DESCENDING"),
+                                          ("T056-118980-IW2", 32613, 56, "DESCENDING")):
+        paths.append(write_static(tmp_path, burst, epsg=epsg, track=track,
+                                  direction=direction))
+    return [str(p) for p in paths]
+
+
+@pytest.fixture
 def one_track(tmp_path):
     """Two bursts of one track abutting on one lattice, twice over, with their statics.
 
@@ -232,6 +255,18 @@ def test_two_zones_land_on_one_grid_the_same_way_they_always_have(two_zones):
     joined = assemble(two_zones, reproject_to="auto")
     assert not isinstance(joined, dict), "one CRS means one Dataset"
     compare("two_zones", digest(joined, exact=False))
+
+
+def test_a_zone_of_two_tracks_joins_a_zone_of_one(mixed_zones):
+    """0.2.0 raised "Dimension time already exists" here. A layer that one zone holds per
+    acquisition and another holds once went down both branches of the concatenation, and
+    the branch for a once-per-burst layer expanded a time axis that was already there."""
+    joined = assemble(mixed_zones, reproject_to="auto")
+
+    assert joined.attrs["tracks"] == [49, 56, 129]
+    assert joined["local_incidence_angle"].dims == ("time", "y", "x"), \
+        "two tracks disagree about it, so it is not one band"
+    compare("mixed_zones", digest(joined, exact=False))
 
 
 def test_a_stack_off_utm_describes_its_own_grid(two_zones):

@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.2.1
+
+Fixes a crash in 0.2.0 on the path a downstream package takes unconditionally:
+`assemble(..., reproject_to=...)` over an AOI spanning two UTM zones, where one of those
+zones holds more than one track.
+
+```
+ValueError: Dimension time already exists.
+```
+
+Two tracks see the ground from different angles, so a zone holding both gives its
+incidence angle a time axis while the zone beside it keeps one band. Concatenating them,
+that layer was classified per zone rather than once, went down both branches, and the
+branch for a once-per-burst layer expanded a time dimension the layer already had. A
+layer is now timed if any zone has it timed, and the zones that hold it once are
+broadcast along their own acquisitions, which is what it means.
+
+Only reachable with `reproject_to` set, two zones, and two tracks in one of them. A single
+zone, or two zones of one track each, was never affected.
+
+The synthetic granules the tests build gave every burst the same incidence angle, so the
+layer stayed one band however many tracks a zone held and this shape never turned up.
+They vary it per track now, and `tests/golden/mixed_zones.json` is that arrangement.
+
 ## 0.2.0
 
 ### What a caller has to know

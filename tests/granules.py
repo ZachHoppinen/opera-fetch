@@ -62,7 +62,10 @@ def _write(path, layer, burst_id, acquired, epsg, column, track, direction, orbi
         values[0, :] = const.MASK_NODATA[const.RTC]
         dtype = "uint8"
     elif layer == "local_incidence_angle":
-        values = (10.0 + cells / 10.0).astype("float32")
+        # Per track, because two tracks see the ground from different angles. Made the
+        # same for every burst, the layer is one band for a whole zone however many
+        # tracks it holds, and the shape a mixed cache produces never turns up.
+        values = (10.0 + track / 100.0 + cells / 10.0).astype("float32")
         dtype = "float32"
     else:
         values = (signature + cells / 1000.0).astype("float32")
