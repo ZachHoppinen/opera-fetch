@@ -56,6 +56,22 @@
     30.0
   ],
   "variables": {
+    "burst_id": {
+      "attrs": {
+        "comment": "0 where no burst observed the cell",
+        "long_name": "burst the cell was taken from, as burst number times 10 plus subswath"
+      },
+      "codes": {
+        "1033273": 120,
+        "1033283": 120
+      },
+      "dims": [
+        "y",
+        "x"
+      ],
+      "dtype": "int32",
+      "hash": "542ac8a34d1849ee"
+    },
     "local_incidence_angle": {
       "attrs": {
         "long_name": "local incidence angle",

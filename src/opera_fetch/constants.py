@@ -83,6 +83,11 @@ MASK_NODATA = {RTC: 255, CSLC: 127}
 MASK_DTYPE = {RTC: "uint8", CSLC: "int8"}
 MASK_MEANINGS = "0 clear, 1 shadow, 2 layover, 3 both"
 
+# Which burst a first-wins mosaic took each cell from, as an integer a file can hold: the
+# burst number times 10 plus the subswath, so T056-118980-IW2 is 1189802. 0 is no burst.
+BURST_LAYER = "burst_id"
+BURST_NODATA = 0
+
 # The OPERA archive starts well after Sentinel-1 did: asking for 2014 returns nothing at
 # all, with no hint that the date rather than the area was the problem. Measured against
 # ASF, not read from a document.

@@ -149,12 +149,29 @@ of averaging a single number.
 |---|---|---|
 | `RTC` | 30 m | `vv`, `vh` or `hh`, `hv`, plus `mask`, linear gamma0 |
 | `RTC_STATIC` | 30 m | `local_incidence_angle` in radians, `number_of_looks`, more on request |
-| `CSLC` | 5 by 10 m | `vv` or `hh`, `complex64` |
+| `CSLC` | 5 by 10 m | `vv` or `hh`, `complex64`, and `burst_id`, which burst each cell came from |
 | `CSLC_STATIC` | 5 by 10 m | `local_incidence_angle`, `mask`, `los_east`, `los_north` |
 
 An RTC stack therefore comes back with `vv`, `vh`, `mask`, `local_incidence_angle` and
-`number_of_looks`; a CSLC one with `vv` (or `hh`), `mask`, `local_incidence_angle`,
-`los_east` and `los_north`.
+`number_of_looks`; a CSLC one with `vv` (or `hh`), `burst_id`, `mask`,
+`local_incidence_angle`, `los_east` and `los_north`.
+
+**A CSLC mosaic is stitched, not blended, and says where.** Two bursts of one pass do not
+share a phase: measured on along-track neighbours of T056 IW2, their amplitudes agree to
+0.1 dB across the overlap but their coherence there is 0.19 and the phase difference is
+noise. So where CSLC bursts overlap the mosaic takes the lower burst ID, on every date,
+and a date that burst is missing stays missing there rather than filling from the
+neighbour, which would decorrelate that date across the whole overlap. Which burst each
+cell came from is the `burst_id` layer, an integer of burst number times 10 plus subswath,
+so `T056-118980-IW2` is 1189802 and 0 is no burst. Anything that mixes pixels across
+that seam, an interferogram from two dates included, sees a jump there, and a window that
+straddles it averages incoherent pixels. Cut one burst back out to work inside it:
+
+```python
+one = stack.where(stack.burst_id == of.burst_code("T056-118980-IW2"))
+```
+
+The overlap the mosaic dropped is still in the cached granules.
 
 What varies between acquisitions is a coordinate on the time axis: `track`,
 `direction`, `platform` (S1A, S1B, S1C) and `absolute_orbit`, which is what a baseline is

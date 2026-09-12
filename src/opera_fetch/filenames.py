@@ -39,6 +39,19 @@ def parse_burst_id(path):
     return f"T{track}-{number}-{swath.upper()}"
 
 
+def burst_code(burst_id):
+    """A burst ID as the integer the ``burst_id`` layer holds: number times 10 plus subswath.
+
+    The ESA burst number is unique along the orbit cycle, so with the subswath it names the
+    burst without the track. T056-118980-IW2 is 1189802.
+    """
+    found = const.BURST_ID.search(burst_id)
+    if not found:
+        raise ValueError(f"{burst_id!r} is not an OPERA burst ID")
+    _, number, swath = found.groups()
+    return int(number) * 10 + int(swath[-1])
+
+
 def parse_layer(path, layers):
     """Which of the named layers a file holds, or None when it is not one of them.
 

@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 
 from opera_fetch import constants as const
 from opera_fetch.filenames import (
@@ -56,3 +57,12 @@ def test_a_reprocessed_granule_supersedes_the_one_it_replaces():
 def test_nothing_is_dropped_when_no_acquisition_repeats():
     granules = [RTC, RTC.replace("20241004T011054Z", "20241016T011054Z")]
     assert len(keep_latest_processing(["a", "b"], granules)) == 2
+
+
+def test_burst_code_is_number_times_ten_plus_subswath():
+    from opera_fetch.filenames import burst_code
+
+    assert burst_code("T056-118980-IW2") == 1189802
+    assert burst_code("t056_118980_iw2") == 1189802
+    with pytest.raises(ValueError):
+        burst_code("not a burst")
