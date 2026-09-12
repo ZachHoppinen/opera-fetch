@@ -173,6 +173,8 @@ def mask_codes(obj):
         if name.endswith("mask") and array.dtype.kind == "f":
             out[name] = (array.fillna(const.MASK_NODATA[product])
                          .astype(const.MASK_DTYPE[product]))
+        elif name == const.BURST_LAYER and array.dtype.kind == "f":
+            out[name] = array.fillna(const.BURST_NODATA).astype("int32")
     return out
 
 

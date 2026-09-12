@@ -245,3 +245,35 @@ def test_a_pass_chains_along_the_sweep_rather_than_from_its_first_acquisition():
 
     # And the stamp is the earliest of them, which is what the mosaic carries.
     assert min(stamps) == at(0).indexes["time"][0]
+
+
+def test_a_date_one_burst_is_missing_stays_missing_in_its_cells():
+    """Two bursts share no phase, so a cell taken from one burst on every other date must
+    not come from the neighbour on the date that burst lacks: that date would decorrelate
+    across the whole overlap. combine_first filled it; the first-wins mosaic leaves it."""
+    a, b = two_overlapping_bursts(fill_a=1.0, fill_b=2.0)
+    a = a.isel(time=[0])          # burst a is missing the second date
+
+    merged = mosaic([a, b], how="first")
+
+    overlap = merged.vv.isel(y=0, x=5)
+    assert overlap.isel(time=0).values == 1.0
+    assert np.isnan(overlap.isel(time=1).values)
+    # Outside the overlap the second burst still delivers both dates.
+    assert (merged.vv.isel(y=0, x=10).values == 2.0).all()
+
+
+def test_the_burst_layer_says_which_burst_each_cell_came_from():
+    from opera_fetch import burst_code
+
+    a, b = two_overlapping_bursts(fill_a=1.0, fill_b=2.0)
+    merged = mosaic([a, b], how="first")
+
+    layer = merged.burst_id
+    assert layer.dtype == np.int32 and layer.dims == ("y", "x")
+    assert layer.isel(y=0, x=5).values == burst_code("T049-103327-IW3")     # overlap: first wins
+    assert layer.isel(y=0, x=10).values == burst_code("T049-103328-IW3")
+    # Cutting a burst back out with the layer gives exactly what that burst delivered.
+    cut = merged.vv.where(layer == burst_code("T049-103328-IW3"))
+    assert (cut.isel(x=slice(8, 12)).values == 2.0).all()
+    assert np.isnan(cut.isel(x=slice(0, 8)).values).all()

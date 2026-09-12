@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- A first-wins mosaic, the default for CSLC, chooses a cell's burst once rather than once
+  per date. It went through `combine_first`, which on a date one burst was missing filled
+  the overlap from the neighbour, and two bursts share no phase (coherence 0.19 across
+  the overlap of two T056 IW2 neighbours, phase difference uniform noise): a series taken
+  from one burst on every date but that one decorrelates on that date across the whole
+  overlap. The date now stays missing in that burst's cells.
+- The mosaic says which burst each cell came from, in a `burst_id` layer of burst number
+  times 10 plus subswath, 0 where none did, so a burst can be cut back out and a window
+  kept from straddling the seam. `burst_code` turns a burst ID into that integer. The
+  layer moves by nearest on reprojection, like a mask.
+
 - A date pandas reads as no date at all is refused rather than sent to ASF. `""` becomes
   `NaT`, and asf_search takes a `NaT` without complaint: it reaches CMR as the literal
   string `"NaT"` in the temporal parameter. Handed the `""` itself asf_search does raise,

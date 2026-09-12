@@ -388,6 +388,8 @@ def _onto_one_crs(stacks, crs, resampling=None):
         # goes by nearest. A complex layer is oversampled first, which is the only way to
         # move it without giving up coherence. Everything else takes the caller's kernel.
         masks = [name for name in stack.data_vars if name.endswith("mask")]
+        if const.BURST_LAYER in stack.data_vars:
+            masks.append(const.BURST_LAYER)
         complex_layers = [name for name in stack.data_vars
                           if np.issubdtype(stack[name].dtype, np.complexfloating)]
         plain = stack.drop_vars(masks + complex_layers)
@@ -401,7 +403,8 @@ def _onto_one_crs(stacks, crs, resampling=None):
         # it rewrote 255 as 254, which OPERA does not define.
         nodata = const.MASK_NODATA[stack.attrs.get("product", const.RTC)]
         for name in masks:
-            matched[name] = stack[name].rio.write_nodata(nodata).rio.reproject_match(
+            code = const.BURST_NODATA if name == const.BURST_LAYER else nodata
+            matched[name] = stack[name].rio.write_nodata(code).rio.reproject_match(
                 reference, resampling=Resampling.nearest)
         for name in complex_layers:
             matched[name] = _oversampled_reproject(stack[name], reference)
