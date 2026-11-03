@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- A mosaic whose bursts do not all share every date no longer fails or loses its
+  `platform`. The join across bursts padded a burst's `platform` with NaN on a date it
+  lacked, which made the text an object array: chunked, as `read_burst` delivers it, dask
+  refused to concatenate it (`Can not use auto rechunking with object dtype`), and in
+  memory the averaged mosaic dropped `platform` altogether. `platform` and
+  `absolute_orbit` describe an acquisition, so they now skip that join and each date
+  takes them from whichever burst saw it, with `absolute_orbit` an integer again. Seen
+  on T005 over Colorado in WY2026, where two IW1 bursts lack 2026-03-19 and 2026-06-30.
+- RTC layers are opened without rioxarray's read lock, which let one thread read at a
+  time across every file. A 42-date, two-burst East River load went from 25 s on 2.9
+  cores to 17 s on 4.5, with identical vv, vh and mask.
+
 - A first-wins mosaic, the default for CSLC, chooses a cell's burst once rather than once
   per date. It went through `combine_first`, which on a date one burst was missing filled
   the overlap from the neighbour, and two bursts share no phase (coherence 0.19 across

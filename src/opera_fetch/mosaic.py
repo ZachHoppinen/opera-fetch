@@ -114,12 +114,41 @@ def mosaic(bursts, bounds=None, how=None):
                         "they cover only part of the mosaic",
                         partial, len(every_acquisition))
 
+    # Platform and orbit describe an acquisition rather than a cell, so they skip the join
+    # across bursts, which pads them with NaN wherever a burst missed a date.
+    acquisition = _acquisition_coords(placed)
+    placed = [burst.drop_vars(list(acquisition), errors="ignore") for burst in placed]
+
     combined = _mean(placed) if how == "mean" else _first(placed)
+    combined = combined.assign_coords(acquisition)
     combined.attrs = _shared_attrs(bursts)
 
     log.debug("mosaicked %d bursts onto %d by %d cells",
               len(placed), grid.sizes["y"], grid.sizes["x"])
     return combined.rio.write_crs(grid.rio.crs)
+
+
+def _acquisition_coords(placed):
+    """Each coordinate on the time axis alone, other than time, whole across the bursts.
+
+    Platform and orbit are the same in every burst that saw an acquisition, so each date
+    takes its value from whichever burst has it. Joined with the rest of a burst instead,
+    a date the burst lacks pads them with NaN: text becomes an object array that dask
+    refuses to concatenate, and integers become floats.
+
+    Loaded, since they are one value per date and the join below is on their labels.
+    """
+    names = {name for burst in placed for name, coord in burst.coords.items()
+             if coord.dims == ("time",) and name != "time"}
+    whole = {}
+    for name in sorted(names):
+        parts = [burst[name].load() for burst in placed if name in burst.coords]
+        coord = reduce(lambda a, b: a.combine_first(b), parts)
+        # Every date some burst saw has a value, so the padding is gone and the type returns.
+        if not coord.isnull().any():
+            coord = coord.astype(parts[0].dtype)
+        whole[name] = coord
+    return whole
 
 
 def _mean(placed):

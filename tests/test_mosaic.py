@@ -277,3 +277,32 @@ def test_the_burst_layer_says_which_burst_each_cell_came_from():
     cut = merged.vv.where(layer == burst_code("T049-103328-IW3"))
     assert (cut.isel(x=slice(8, 12)).values == 2.0).all()
     assert np.isnan(cut.isel(x=slice(0, 8)).values).all()
+
+
+def bursts_with_a_missing_date():
+    """Two bursts as rtc.read_burst delivers them: chunked, with platform and orbit on the
+    time axis and two platforms in the series. The second burst lacks the middle date."""
+    platforms, orbits = ["S1C", "S1D", "S1C"], [100, 200, 300]
+    a = make_burst(west=500_010, north=4_332_210, columns=8, times=3, fill=2.0)
+    b = make_burst(west=500_010 + 4 * 30, north=4_332_210, columns=8, times=3, fill=4.0)
+    b.attrs["burst_id"] = "T049-103328-IW3"
+    bursts = []
+    for burst in (a, b):
+        burst = burst.assign_coords(platform=("time", platforms), absolute_orbit=("time", orbits))
+        bursts.append(burst.chunk({"time": -1}))
+    bursts[1] = bursts[1].isel(time=[0, 2])
+    return bursts
+
+
+@pytest.mark.parametrize("how", ["mean", "first"])
+def test_a_date_one_burst_is_missing_keeps_its_platform_and_orbit(how):
+    """The archive missing a date for one burst padded that burst's platform with NaN in
+    the join across bursts, which made the text an object array: dask refused to join it,
+    and where it did not refuse the platform fell out of the mosaic. Both describe the
+    acquisition, so they come back whole from the bursts that saw it."""
+    merged = mosaic(bursts_with_a_missing_date(), how=how)
+
+    assert list(merged.platform.values) == ["S1C", "S1D", "S1C"]
+    assert list(merged.absolute_orbit.values) == [100, 200, 300]
+    assert merged.absolute_orbit.dtype == np.int64
+    assert merged.sizes["time"] == 3
