@@ -654,3 +654,203 @@ def test_a_pass_short_of_a_layer_does_not_float_the_mask(caplog):
     assert stacked["mask"].dtype == np.uint8
     assert sorted(np.unique(stacked["mask"].values).tolist()) == [0, 255]
     assert "mask" in caplog.text
+
+
+def _a_pass_across_the_zone_line(directory):
+    """One track's pass on two dates, its western burst in 12N and its eastern in 13N, the
+    eastern acquired six seconds earlier, as T049 crosses 108 W."""
+    from tests.granules import write_granule
+
+    paths = []
+    for day in ("20251005", "20251017"):
+        paths += write_granule(directory, "T049-103319-IW2", f"{day}T010925",
+                               f"{day}T120000", epsg=32612)
+        paths += write_granule(directory, "T049-103320-IW3", f"{day}T010919",
+                               f"{day}T120000", epsg=32613)
+    return paths
+
+
+def test_a_pass_across_the_zone_line_is_one_acquisition_once_reprojected(tmp_path):
+    """Each zone stamped its half of a pass from its own first burst, six seconds apart,
+    and the join onto one CRS matched timestamps exactly: every pass became two time
+    steps on one day, each covering half the area."""
+    from opera_fetch.stack import assemble
+
+    joined = assemble(_a_pass_across_the_zone_line(tmp_path), reproject_to="EPSG:32613")
+
+    assert joined.sizes["time"] == 2
+    assert list(joined.indexes["time"].strftime("%Y-%m-%d")) == ["2025-10-05", "2025-10-17"]
+    # The two zones cover the same ground here, so every cell either zone saw is observed
+    # on both dates, and the merged mask is still a class code.
+    observed = np.isfinite(joined.vv).any("time")
+    assert bool(observed.any())
+    assert bool((np.isfinite(joined.vv).sum("time") == 2).where(observed, True).all())
+    assert joined.mask.dtype == np.uint8
+
+
+def test_both_halves_of_a_pass_across_the_zone_line_carry_one_timestamp(tmp_path):
+    """Left on their own zones the two halves still describe one acquisition, so a caller
+    joining them later finds them at the same time."""
+    from opera_fetch.stack import assemble
+
+    zones = assemble(_a_pass_across_the_zone_line(tmp_path))
+
+    assert sorted(zones) == [32612, 32613]
+    assert list(zones[32612].indexes["time"]) == list(zones[32613].indexes["time"])
+
+
+def _zone_part(fill, looks, epsg=32613, track=49):
+    """One track's piece of a zone, already moved onto the shared grid, two dates."""
+    part = make_burst(west=240_570, north=4_332_150, columns=8, fill=fill, epsg=epsg,
+                      static=False, track=track)
+    part["number_of_looks"] = (("y", "x"), np.full((part.sizes["y"], part.sizes["x"]),
+                                                    looks, dtype="float32"))
+    part.coords["track"] = ("time", [track] * part.sizes["time"])
+    part.coords["direction"] = ("time", ["ASCENDING"] * part.sizes["time"])
+    return part
+
+
+def test_a_tracks_zones_combine_weighted_by_looks_and_sum_them():
+    """As bursts do: a flat mean of two zones, and their looks averaged rather than
+    summed, put a noise floor twice what it is across the overlap."""
+    from opera_fetch.stack import _combined_by_track
+
+    [joined] = _combined_by_track([_zone_part(1.0, 2.0), _zone_part(4.0, 3.0)])
+
+    assert np.allclose(joined.vv.values, (2 * 1.0 + 3 * 4.0) / 5)
+    assert np.allclose(joined.number_of_looks.values, 5.0)
+    assert joined.sizes["time"] == 2
+
+
+def test_zones_that_meet_without_overlapping_each_keep_their_own_cells():
+    from opera_fetch.stack import _combined_by_track
+
+    west, east = _zone_part(1.0, 2.0), _zone_part(4.0, 3.0)
+    half = west.sizes["x"] // 2
+    west["vv"] = west.vv.where(west.x < west.x[half])
+    east["vv"] = east.vv.where(east.x >= east.x[half])
+
+    [joined] = _combined_by_track([west, east])
+
+    assert np.allclose(joined.vv.isel(x=slice(None, half)).values, 1.0)
+    assert np.allclose(joined.vv.isel(x=slice(half, None)).values, 4.0)
+    # Each cell was seen by one zone, so it carries that zone's looks and no more.
+    assert np.allclose(joined.number_of_looks.isel(x=0).values, 2.0)
+    assert np.allclose(joined.number_of_looks.isel(x=-1).values, 3.0)
+
+
+def test_complex_zones_choose_a_cell_once_and_keep_its_burst():
+    """A zone's phase has no datum in common with its neighbour's, so a cell taken from
+    one zone on every date but the one it is missing stays missing on that date rather
+    than switching zones for it. The burst each cell came from survives the choice."""
+    from opera_fetch import constants as const
+    from opera_fetch.stack import _combined_by_track
+
+    first, second = _zone_part(1.0, 2.0), _zone_part(4.0, 3.0)
+    for part, code in ((first, 1033271), (second, 1033203)):
+        part["vv"] = (part.vv + 1j).astype("complex64")
+        part[const.BURST_LAYER] = (("y", "x"), np.full(part.vv.shape[1:], code, "int32"))
+    first["vv"] = first.vv.where(~((first.time == first.time[1]) & (first.x == first.x[0])))
+
+    [joined] = _combined_by_track([first, second])
+
+    cell = joined.vv.isel(x=0, y=0)
+    assert cell.values[0] == 1.0 + 1j
+    assert np.isnan(cell.values[1]), "filled from the other zone on that one date"
+    assert (joined[const.BURST_LAYER].values == 1033271).all()
+
+
+def test_two_tracks_at_one_time_are_not_combined():
+    from opera_fetch.stack import _combined_by_track
+
+    parts = _combined_by_track([_zone_part(1.0, 2.0, track=49),
+                                _zone_part(4.0, 3.0, track=56)])
+
+    assert len(parts) == 2
+
+
+def test_a_zone_without_its_track_is_combined_with_nothing():
+    from opera_fetch.stack import _combined_by_track
+
+    a, b = _zone_part(1.0, 2.0), _zone_part(4.0, 3.0)
+    parts = _combined_by_track([a.drop_vars(["track", "direction"]), b])
+
+    assert len(parts) == 2
+
+
+def test_a_pass_across_the_zone_line_keeps_its_static_layers(tmp_path):
+    """Both zones bring an incidence angle and looks, which differ once one is moved, so
+    they go per acquisition; the pass is still one step and its looks are still known."""
+    from tests.granules import write_static
+
+    from opera_fetch.stack import assemble
+
+    paths = _a_pass_across_the_zone_line(tmp_path)
+    for burst_id, epsg in (("T049-103319-IW2", 32612), ("T049-103320-IW3", 32613)):
+        for layer in ("local_incidence_angle", "number_of_looks"):
+            paths.append(write_static(tmp_path, burst_id, layer=layer, epsg=epsg))
+
+    joined = assemble(paths, reproject_to="EPSG:32613")
+
+    assert joined.sizes["time"] == 2
+    assert bool(np.isfinite(joined.number_of_looks).any())
+    assert bool(np.isfinite(joined.local_incidence_angle).any())
+
+
+def test_a_static_layer_with_a_time_axis_does_not_count_as_an_observation():
+    """A zone of two tracks gives its incidence angle a time axis. Counted as an
+    observation it claimed every cell of the footprint, so "first" took cells from a zone
+    that never saw them and blanked the other zone's backscatter there."""
+    from opera_fetch.stack import _combined_by_track
+
+    west, east = _zone_part(1.0, 2.0), _zone_part(4.0, 3.0)
+    half = west.sizes["x"] // 2
+    west["vv"] = west.vv.where(west.x < west.x[half])
+    east["vv"] = east.vv.where(east.x >= east.x[half])
+    angle = np.full((west.sizes["time"], west.sizes["y"], west.sizes["x"]), 0.5, "float32")
+    west["local_incidence_angle"] = (("time", "y", "x"), angle)
+
+    [joined] = _combined_by_track([west, east], how="first")
+
+    assert np.allclose(joined.vv.isel(x=slice(half, None)).values, 4.0)
+
+
+def test_the_zone_left_unresampled_wins_where_zones_meet():
+    from opera_fetch.stack import _combined_by_track
+
+    moved, native = _zone_part(1.0, 2.0), _zone_part(4.0, 3.0)
+    for part in (moved, native):
+        part["vv"] = (part.vv + 1j).astype("complex64")
+
+    [joined] = _combined_by_track([moved, native], preferred=1)
+
+    assert np.allclose(joined.vv.values, 4.0 + 1j)
+
+
+def test_tracks_in_one_zone_each_are_handed_back_untouched():
+    from opera_fetch.stack import _combined_by_track
+
+    stacks = [_zone_part(1.0, 2.0, track=49), _zone_part(4.0, 3.0, track=56)]
+
+    combined = _combined_by_track(stacks)
+
+    assert all(out is given for out, given in zip(combined, stacks, strict=True))
+
+
+def test_combine_refuses_a_method_it_does_not_have():
+    from opera_fetch.mosaic import combine
+
+    with pytest.raises(ValueError, match="'mean' or 'first'"):
+        combine([_zone_part(1.0, 2.0), _zone_part(4.0, 3.0)], how="median")
+
+
+def test_averaging_complex_zones_is_warned_about(caplog):
+    from opera_fetch.mosaic import combine
+
+    parts = [_zone_part(1.0, 2.0), _zone_part(4.0, 3.0)]
+    for part in parts:
+        part["vv"] = (part.vv + 1j).astype("complex64")
+
+    combine(parts, how="mean")
+
+    assert "phases are not on a common datum" in caplog.text

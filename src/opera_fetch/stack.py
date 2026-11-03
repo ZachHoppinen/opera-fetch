@@ -24,7 +24,7 @@ from opera_fetch import cslc, filenames, rtc
 from opera_fetch.aoi import as_geometry, projected
 from opera_fetch.errors import NoAcquisitions
 from opera_fetch.grid import clip, mask_codes, measured_spacing
-from opera_fetch.mosaic import TOLERANCE, align_passes, mosaic
+from opera_fetch.mosaic import TOLERANCE, align_passes, combine, mosaic
 from opera_fetch.search import as_list
 
 log = logging.getLogger(__name__)
@@ -160,18 +160,24 @@ def assemble(paths, aoi=None, aoi_crs=None, how=None, tolerance=TOLERANCE,
 
     if aoi is not None:
         aoi = as_geometry(aoi, aoi_crs)
-    mosaicked = defaultdict(list)
+    reaching = {}
     for key, group in sorted(passes.items()):
         wanted = _overlapping(group, aoi) if aoi is not None else group
         if not wanted:
             log.info("%s: no burst reaches the AOI", key)
             continue
+        reaching[key] = wanted
+    # Stamped over every zone of a track at once, so both halves of a pass across a zone
+    # line carry one timestamp rather than each its own first burst's.
+    aligned = _aligned_across_zones(reaching, tolerance)
 
+    mosaicked = defaultdict(list)
+    for key, wanted in sorted(aligned.items()):
         # Sizing the grid from the AOI keeps a whole track from being mostly empty space.
         # Every pass of a zone gets the same bounds, and they are already on one lattice,
         # so the grids come out identical and the passes concatenate without resampling.
         area = None if aoi is None else projected(aoi, key.epsg).bounds
-        stack = mosaic(align_passes(wanted, tolerance), bounds=area, how=how)
+        stack = mosaic(wanted, bounds=area, how=how)
         if aoi is not None and mask:
             stack = clip(stack, aoi, mask=True)
 
@@ -202,8 +208,85 @@ def assemble(paths, aoi=None, aoi_crs=None, how=None, tolerance=TOLERANCE,
     if reproject_to == "auto":
         reproject_to = f"EPSG:{_best_zone(stacks, aoi)}"
     if reproject_to is not None:
-        return _onto_one_crs(stacks, reproject_to, resampling)
+        return _onto_one_crs(stacks, reproject_to, resampling, overlap=how)
     return stacks
+
+
+def _combined_by_track(stacks, how=None, preferred=None):
+    """Zones already on one grid, with each track's zones combined into one, as a list.
+
+    A pass across a zone line arrives once from each zone, at one timestamp since
+    _aligned_across_zones. The zones of a track are combined by ``mosaic.combine``, as
+    bursts are: "mean" weighs by looks and sums them, "first" chooses each cell's zone
+    once for every date. Different tracks are not combined, since two tracks at one
+    timestamp are two acquisitions from two geometries.
+
+    preferred is the position of the zone that was not resampled. It goes first within
+    each track, so "first" takes OPERA's own values wherever that zone saw the cell.
+    """
+    by_orbit = defaultdict(list)
+    for position, stack in enumerate(stacks):
+        if "track" not in stack.coords or "direction" not in stack.coords:
+            # Without its track a stack cannot be matched to another, so it combines with
+            # nothing rather than risk two geometries in one step.
+            by_orbit[(-1 - position, "")].append(position)
+            continue
+        orbits = set(zip(stack["track"].values.tolist(), stack["direction"].values.tolist(),
+                         strict=True))
+        for orbit in sorted(orbits):
+            by_orbit[orbit].append(position)
+
+    # Nothing spans two zones, so there is nothing to combine and nothing to slice.
+    if all(len(positions) == 1 for positions in by_orbit.values()):
+        return list(stacks)
+
+    combined = []
+    # In the order the zones first gave them, which is the order the time stack kept before.
+    for (track, direction), positions in by_orbit.items():
+        if len(positions) == 1 and track < 0:
+            combined.append(stacks[positions[0]])
+            continue
+        positions = sorted(positions, key=lambda position: position != preferred)
+        parts = []
+        for position in positions:
+            stack = stacks[position]
+            here = (stack["track"] == track) & (stack["direction"] == direction)
+            parts.append(stack.isel(time=np.flatnonzero(here.values)))
+        if len(parts) == 1:
+            combined.append(parts[0])
+            continue
+        joined = combine(parts, how)
+        joined.attrs = parts[0].attrs
+        combined.append(joined.rio.write_crs(parts[0].rio.crs))
+        log.info("T%03d %s: its %d zones combined into one", track, direction, len(parts))
+    return combined
+
+
+def _aligned_across_zones(passes, tolerance):
+    """Every pass's bursts, stamped by align_passes over all zones of its track at once.
+
+    A track crossing a zone line is split between two keys, one a zone. Aligned one key
+    at a time, each half took its own first burst's timestamp: on T049 at 108 W the 13N
+    half was stamped six seconds before the 12N half, and joined onto one CRS every pass
+    became two time steps on one day, each covering half the area.
+
+    A pass is stamped with its earliest burst among those reaching the AOI, so the stamp
+    depends on the AOI: the same 12N acquisition reads 01:09:25 alone and 01:09:19 once
+    the AOI also reaches 13N. That was already so within a zone. Compare acquisitions by
+    day and track, not by exact timestamp.
+    """
+    by_orbit = defaultdict(list)
+    for key in sorted(passes):
+        by_orbit[(key.track, key.direction)].append(key)
+
+    aligned = {}
+    for keys in by_orbit.values():
+        bursts = [burst for key in keys for burst in passes[key]]
+        stamped = iter(align_passes(bursts, tolerance))
+        # align_passes keeps the order it is given, so each key takes its own back.
+        for key in keys:
+            aligned[key] = [next(stamped) for _ in passes[key]]
+    return aligned
 
 
 def _asked_for(key, track, direction):
@@ -350,8 +433,11 @@ def _best_zone(stacks, aoi=None):
     return best
 
 
-def _onto_one_crs(stacks, crs, resampling=None):
+def _onto_one_crs(stacks, crs, resampling=None, overlap=None):
     """Every zone onto the grid the caller asked for, as a single Dataset.
+
+    overlap is how a track's zones combine where they meet, "mean" or "first", as
+    ``assemble``'s how is for bursts, and defaults the same way.
 
     A zone already in that CRS is the reference and is not touched, so the result stays on
     the grid OPERA delivered and only the other zones move. Ask for a CRS no zone is in and
@@ -378,8 +464,11 @@ def _onto_one_crs(stacks, crs, resampling=None):
         reference = reference.rio.reproject(target, resampling=how)
 
     moved = []
+    preferred = None
     for epsg, stack in sorted(stacks.items()):
         if CRS.from_user_input(stack.rio.crs) == CRS.from_user_input(reference.rio.crs):
+            # Left where OPERA put it, so its values are the ones to keep where zones meet.
+            preferred = len(moved)
             moved.append(stack)
             continue
         log.warning("resampling EPSG:%d onto %s, which is the one place this package "
@@ -412,7 +501,9 @@ def _onto_one_crs(stacks, crs, resampling=None):
 
     # Reprojecting floats a mask wherever a cell has no source, which _stacked_in_time
     # puts back to class codes along with everything else its own join fills.
-    joined = _stacked_in_time(moved, join="outer").sortby("time")
+    # A pass across a zone line arrives once from each zone; its zones become one first.
+    joined = _stacked_in_time(_combined_by_track(moved, overlap, preferred), join="outer")
+    joined = joined.sortby("time")
 
     joined.attrs = _across_zones([stacks[epsg] for epsg in sorted(stacks)])
     joined.attrs.update(epsg=target.to_epsg(), reprojected_from=sorted(stacks))
