@@ -114,18 +114,28 @@ def mosaic(bursts, bounds=None, how=None):
                         "they cover only part of the mosaic",
                         partial, len(every_acquisition))
 
-    # Platform and orbit describe an acquisition rather than a cell, so they skip the join
-    # across bursts, which pads them with NaN wherever a burst missed a date.
-    acquisition = _acquisition_coords(placed)
-    placed = [burst.drop_vars(list(acquisition), errors="ignore") for burst in placed]
-
-    combined = _mean(placed) if how == "mean" else _first(placed)
-    combined = combined.assign_coords(acquisition)
+    combined = combine(placed, how)
     combined.attrs = _shared_attrs(bursts)
 
     log.debug("mosaicked %d bursts onto %d by %d cells",
               len(placed), grid.sizes["y"], grid.sizes["x"])
     return combined.rio.write_crs(grid.rio.crs)
+
+
+def combine(placed, how):
+    """Parts already on one grid and one time axis as one Dataset, overlaps combined by how.
+
+    The parts are bursts when mosaicking, or the zones of one track once
+    ``stack._onto_one_crs`` has put them on one grid: either way "mean" weighs them by
+    looks and sums the looks, and "first" chooses each cell's part once for every date.
+    """
+    # Platform and orbit describe an acquisition rather than a cell, so they skip the join
+    # across parts, which pads them with NaN wherever a part missed a date.
+    acquisition = _acquisition_coords(placed)
+    placed = [part.drop_vars(list(acquisition), errors="ignore") for part in placed]
+
+    combined = _mean(placed) if how == "mean" else _first(placed)
+    return combined.assign_coords(acquisition)
 
 
 def _acquisition_coords(placed):
@@ -276,10 +286,18 @@ def _first(placed):
         combined = combined.assign_coords({name: coord})
 
     combined = _keep_attrs(combined, placed[0])
-    codes = xr.DataArray([burst_code(burst.attrs["burst_id"]) if burst.attrs.get("burst_id")
-                          else const.BURST_NODATA for burst in placed], dims="burst")
-    combined[const.BURST_LAYER] = (codes.isel(burst=source.clip(min=0))
-                                   .where(source >= 0, const.BURST_NODATA).astype("int32"))
+    if const.BURST_LAYER in stacked:
+        # Parts that are mosaics themselves, as zones are, already say which burst each cell
+        # came from, and the selection above carried that through.
+        layer = combined[const.BURST_LAYER].where(source >= 0, const.BURST_NODATA)
+        combined[const.BURST_LAYER] = layer.fillna(const.BURST_NODATA).astype("int32")
+    else:
+        codes = xr.DataArray([burst_code(burst.attrs["burst_id"])
+                              if burst.attrs.get("burst_id") else const.BURST_NODATA
+                              for burst in placed], dims="burst")
+        combined[const.BURST_LAYER] = (codes.isel(burst=source.clip(min=0))
+                                       .where(source >= 0, const.BURST_NODATA)
+                                       .astype("int32"))
     combined[const.BURST_LAYER].attrs = {
         "long_name": "burst the cell was taken from, as burst number times 10 plus subswath",
         "comment": f"{const.BURST_NODATA} where no burst observed the cell"}

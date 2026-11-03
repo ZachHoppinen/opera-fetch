@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import NamedTuple
 
 import numpy as np
-import pandas as pd
 import xarray as xr
 from pyproj import CRS
 
@@ -25,7 +24,7 @@ from opera_fetch import cslc, filenames, rtc
 from opera_fetch.aoi import as_geometry, projected
 from opera_fetch.errors import NoAcquisitions
 from opera_fetch.grid import clip, mask_codes, measured_spacing
-from opera_fetch.mosaic import TOLERANCE, align_passes, mosaic
+from opera_fetch.mosaic import TOLERANCE, align_passes, combine, mosaic
 from opera_fetch.search import as_list
 
 log = logging.getLogger(__name__)
@@ -209,55 +208,45 @@ def assemble(paths, aoi=None, aoi_crs=None, how=None, tolerance=TOLERANCE,
     if reproject_to == "auto":
         reproject_to = f"EPSG:{_best_zone(stacks, aoi)}"
     if reproject_to is not None:
-        return _onto_one_crs(stacks, reproject_to, resampling)
+        return _onto_one_crs(stacks, reproject_to, resampling, overlap=how)
     return stacks
 
 
-def _merged_repeats(stack):
-    """One time step per timestamp, combining the steps that share one.
+def _combined_by_track(stacks, how=None):
+    """Zones already on one grid, with each track's zones combined into one, as a list.
 
-    Zones joined onto one grid each deliver their part of a pass that crosses the zone
-    line, at the same timestamp once aligned. A cell takes its value from whichever zone
-    saw it, and where both did they combine as mosaic combines bursts: real layers by
-    mean, masks by worst code, complex layers by the first zone, since two zones' phases
-    share no datum any more than two bursts' do.
-
-    Only steps of one track and direction merge. Two tracks at one timestamp are two
-    acquisitions seen from two geometries, and stay two steps.
+    A pass across a zone line arrives once from each zone, at one timestamp since
+    _aligned_across_zones. The zones of a track are combined by ``mosaic.combine``, as
+    bursts are: "mean" weighs by looks and sums them, "first" chooses each cell's zone
+    once for every date, and how defaults the way mosaic's does. Different tracks are not
+    combined, since two tracks at one timestamp are two acquisitions from two geometries.
     """
-    times = stack.indexes["time"]
-    tracks = stack["track"].values if "track" in stack.coords else np.zeros(times.size)
-    directions = (stack["direction"].values if "direction" in stack.coords
-                  else np.zeros(times.size))
-    # One label per acquisition: when, and from which pass geometry.
-    labels, unique = pd.factorize(pd.MultiIndex.from_arrays([times, tracks, directions]))
-    if len(unique) == times.size:
-        return stack
-
-    product = stack.attrs.get("product", const.RTC)
-    nodata = const.MASK_NODATA[product]
-    # The first step of each acquisition carries its per-acquisition coordinates, which the
-    # zones agree on, and the static layers, which have no time to repeat.
-    _, first = np.unique(labels, return_index=True)
-    merged = stack.isel(time=first)
-    step = xr.DataArray(labels, dims="time", name="step")
-    for name, array in stack.data_vars.items():
-        if "time" not in array.dims:
+    by_orbit = defaultdict(list)
+    for position, stack in enumerate(stacks):
+        if "track" not in stack.coords or "direction" not in stack.coords:
+            # Without its track a stack cannot be matched to another, so it combines with
+            # nothing rather than risk two geometries in one step.
+            by_orbit[(-1 - position, "")].append(stack)
             continue
-        grouped = array.where(array != nodata) if name.endswith("mask") else array
-        # Unobserved is not a code to take the worst of; mask_codes puts it back.
-        if name.endswith("mask"):
-            combined = grouped.groupby(step).max(skipna=True)
-        elif np.issubdtype(array.dtype, np.complexfloating):
-            combined = grouped.groupby(step).first(skipna=True)
-        else:
-            combined = grouped.groupby(step).mean(skipna=True)
-        # Back onto the time axis, in the acquisition order the labels were given in.
-        combined = combined.rename(step="time").transpose(*array.dims)
-        merged[name] = combined.assign_coords(time=merged["time"])
-    log.info("%d time steps from zones on one grid merged into %d acquisitions",
-             times.size, merged.sizes["time"])
-    return mask_codes(merged)
+        orbits = sorted(set(zip(stack["track"].values.tolist(),
+                                stack["direction"].values.tolist(), strict=True)))
+        for track, direction in orbits:
+            here = (stack["track"] == track) & (stack["direction"] == direction)
+            by_orbit[(track, direction)].append(stack.isel(time=np.flatnonzero(here.values)))
+
+    combined = []
+    # In the order the zones first gave them, which is the order the time stack kept before.
+    for (track, direction), parts in by_orbit.items():
+        if len(parts) == 1:
+            combined.append(parts[0])
+            continue
+        complex_data = any(np.issubdtype(part[name].dtype, np.complexfloating)
+                           for part in parts for name in part.data_vars)
+        joined = combine(parts, how or ("first" if complex_data else "mean"))
+        joined.attrs = parts[0].attrs
+        combined.append(joined.rio.write_crs(parts[0].rio.crs))
+        log.info("T%03d %s: its %d zones combined into one", track, direction, len(parts))
+    return combined
 
 
 def _aligned_across_zones(passes, tolerance):
@@ -267,6 +256,11 @@ def _aligned_across_zones(passes, tolerance):
     at a time, each half took its own first burst's timestamp: on T049 at 108 W the 13N
     half was stamped six seconds before the 12N half, and joined onto one CRS every pass
     became two time steps on one day, each covering half the area.
+
+    A pass is stamped with its earliest burst among those reaching the AOI, so the stamp
+    depends on the AOI: the same 12N acquisition reads 01:09:25 alone and 01:09:19 once
+    the AOI also reaches 13N. That was already so within a zone. Compare acquisitions by
+    day and track, not by exact timestamp.
     """
     by_orbit = defaultdict(list)
     for key in sorted(passes):
@@ -426,8 +420,11 @@ def _best_zone(stacks, aoi=None):
     return best
 
 
-def _onto_one_crs(stacks, crs, resampling=None):
+def _onto_one_crs(stacks, crs, resampling=None, overlap=None):
     """Every zone onto the grid the caller asked for, as a single Dataset.
+
+    overlap is how a track's zones combine where they meet, "mean" or "first", as
+    ``assemble``'s how is for bursts, and defaults the same way.
 
     A zone already in that CRS is the reference and is not touched, so the result stays on
     the grid OPERA delivered and only the other zones move. Ask for a CRS no zone is in and
@@ -488,9 +485,9 @@ def _onto_one_crs(stacks, crs, resampling=None):
 
     # Reprojecting floats a mask wherever a cell has no source, which _stacked_in_time
     # puts back to class codes along with everything else its own join fills.
-    joined = _stacked_in_time(moved, join="outer").sortby("time")
-    # A pass across a zone line arrives once from each zone, now on one grid and one time.
-    joined = _merged_repeats(joined)
+    # A pass across a zone line arrives once from each zone; its zones become one first.
+    joined = _stacked_in_time(_combined_by_track(moved, overlap), join="outer")
+    joined = joined.sortby("time")
 
     joined.attrs = _across_zones([stacks[epsg] for epsg in sorted(stacks)])
     joined.attrs.update(epsg=target.to_epsg(), reprojected_from=sorted(stacks))
