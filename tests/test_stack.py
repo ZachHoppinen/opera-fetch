@@ -795,3 +795,62 @@ def test_a_pass_across_the_zone_line_keeps_its_static_layers(tmp_path):
     assert joined.sizes["time"] == 2
     assert bool(np.isfinite(joined.number_of_looks).any())
     assert bool(np.isfinite(joined.local_incidence_angle).any())
+
+
+def test_a_static_layer_with_a_time_axis_does_not_count_as_an_observation():
+    """A zone of two tracks gives its incidence angle a time axis. Counted as an
+    observation it claimed every cell of the footprint, so "first" took cells from a zone
+    that never saw them and blanked the other zone's backscatter there."""
+    from opera_fetch.stack import _combined_by_track
+
+    west, east = _zone_part(1.0, 2.0), _zone_part(4.0, 3.0)
+    half = west.sizes["x"] // 2
+    west["vv"] = west.vv.where(west.x < west.x[half])
+    east["vv"] = east.vv.where(east.x >= east.x[half])
+    angle = np.full((west.sizes["time"], west.sizes["y"], west.sizes["x"]), 0.5, "float32")
+    west["local_incidence_angle"] = (("time", "y", "x"), angle)
+
+    [joined] = _combined_by_track([west, east], how="first")
+
+    assert np.allclose(joined.vv.isel(x=slice(half, None)).values, 4.0)
+
+
+def test_the_zone_left_unresampled_wins_where_zones_meet():
+    from opera_fetch.stack import _combined_by_track
+
+    moved, native = _zone_part(1.0, 2.0), _zone_part(4.0, 3.0)
+    for part in (moved, native):
+        part["vv"] = (part.vv + 1j).astype("complex64")
+
+    [joined] = _combined_by_track([moved, native], preferred=1)
+
+    assert np.allclose(joined.vv.values, 4.0 + 1j)
+
+
+def test_tracks_in_one_zone_each_are_handed_back_untouched():
+    from opera_fetch.stack import _combined_by_track
+
+    stacks = [_zone_part(1.0, 2.0, track=49), _zone_part(4.0, 3.0, track=56)]
+
+    combined = _combined_by_track(stacks)
+
+    assert all(out is given for out, given in zip(combined, stacks, strict=True))
+
+
+def test_combine_refuses_a_method_it_does_not_have():
+    from opera_fetch.mosaic import combine
+
+    with pytest.raises(ValueError, match="'mean' or 'first'"):
+        combine([_zone_part(1.0, 2.0), _zone_part(4.0, 3.0)], how="median")
+
+
+def test_averaging_complex_zones_is_warned_about(caplog):
+    from opera_fetch.mosaic import combine
+
+    parts = [_zone_part(1.0, 2.0), _zone_part(4.0, 3.0)]
+    for part in parts:
+        part["vv"] = (part.vv + 1j).astype("complex64")
+
+    combine(parts, how="mean")
+
+    assert "phases are not on a common datum" in caplog.text

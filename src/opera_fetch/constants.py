@@ -57,6 +57,13 @@ LOOKS = "number_of_looks"
 CSLC_DATA = ("VV", "HH")
 CSLC_STATIC_DATA = ("local_incidence_angle", "layover_shadow_mask", "los_east", "los_north")
 
+# Every static layer by the name it has in a stack. The RTC static mask is renamed so it
+# can sit beside the per-acquisition mask. A static layer stays static in meaning even
+# when joining tracks has given it a time axis.
+STATIC_NAMES = frozenset(
+    {name for name in LAYERS[RTC_STATIC] if name != "mask"} | {"static_mask"}
+    | set(CSLC_STATIC_DATA))
+
 # How a reprojection moves each kind of layer. Real data keeps nearest, which moves values
 # without inventing any, and the caller can choose otherwise. A mask is categorical, so it
 # is nearest whatever the data does. Complex is not a kernel choice at all: it is

@@ -86,13 +86,6 @@ def mosaic(bursts, bounds=None, how=None):
         raise ValueError("no bursts to mosaic")
     _one_pass(bursts)
 
-    # What the data is decides how overlaps combine, unless the caller says otherwise.
-    complex_data = any(np.issubdtype(burst[name].dtype, np.complexfloating)
-                       for burst in bursts for name in burst.data_vars)
-    how = how or ("first" if complex_data else "mean")
-    if how == "mean" and complex_data:
-        log.warning("averaging complex bursts: their phases are not on a common datum")
-
     grid = grid_like(bursts, bounds)
     placed = [place(burst, grid) for burst in bursts]
     # A layer only some bursts carry still mosaics, but covers only their part of it.
@@ -122,13 +115,24 @@ def mosaic(bursts, bounds=None, how=None):
     return combined.rio.write_crs(grid.rio.crs)
 
 
-def combine(placed, how):
+def combine(placed, how=None):
     """Parts already on one grid and one time axis as one Dataset, overlaps combined by how.
 
     The parts are bursts when mosaicking, or the zones of one track once
     ``stack._onto_one_crs`` has put them on one grid: either way "mean" weighs them by
     looks and sums the looks, and "first" chooses each cell's part once for every date.
+    how defaults to "first" for complex data and "mean" for anything else.
     """
+    # What the data is decides how overlaps combine, unless the caller says otherwise.
+    complex_data = any(np.issubdtype(part[name].dtype, np.complexfloating)
+                       for part in placed for name in part.data_vars)
+    how = how or ("first" if complex_data else "mean")
+    if how not in ("mean", "first"):
+        raise ValueError(f"how is 'mean' or 'first', not {how!r}")
+    if how == "mean" and complex_data:
+        log.warning("averaging complex data across bursts or zones: their phases are not "
+                    "on a common datum")
+
     # Platform and orbit describe an acquisition rather than a cell, so they skip the join
     # across parts, which pads them with NaN wherever a part missed a date.
     acquisition = _acquisition_coords(placed)
@@ -174,8 +178,9 @@ def _warn_if_bursts_disagree(name, parts):
     distinct = values.groupby(level=0).nunique()
     clashing = distinct.index[distinct > 1]
     if len(clashing):
-        log.warning("bursts disagree on %s for %d date(s), first %s; keeping the first "
-                    "burst's value", name, len(clashing), clashing[0])
+        log.warning("the bursts or zones being combined disagree on %s for %d date(s), "
+                    "first %s; keeping the first one's value", name, len(clashing),
+                    clashing[0])
 
 
 def _mean(placed):
@@ -233,9 +238,14 @@ def _delivered(data):
     whether or not the radar returned anything from a given cell. Collapsed over time
     because the looks layer does not vary in time either: what a burst can see is fixed
     by its geometry, so the dates of one burst agree about this to within nothing.
+
+    Static layers are left out by name, not only by shape: a zone holding two tracks gives
+    its incidence angle a time axis, and counted as an observation it would claim every
+    cell of the footprint, seen or not.
     """
     timed = [name for name in data.data_vars
-             if name != const.LOOKS and "time" in data[name].dims]
+             if name not in const.STATIC_NAMES and name != const.BURST_LAYER
+             and "time" in data[name].dims]
     if not timed:
         return True
     seen = np.isfinite(data[timed[0]])
@@ -258,6 +268,11 @@ def _first(placed):
     The choice is kept as the ``burst_id`` layer, an integer per cell, so a burst can be
     cut back out of the mosaic with ``stack.where(stack.burst_id == burst_code(id))``.
     """
+    # A part that is a mosaic already carries its burst layer. Where only some do, the
+    # others get theirs from their own burst ID, so no cell loses where it came from.
+    if any(const.BURST_LAYER in part for part in placed):
+        placed = [part if const.BURST_LAYER in part else _with_burst_layer(part)
+                  for part in placed]
     stacked = xr.concat(placed, dim="burst", join="outer")
     masks = [name for name in stacked.data_vars if name.endswith("mask")]
     seen = _delivered(stacked.drop_vars(masks))
@@ -303,6 +318,14 @@ def _first(placed):
         "comment": f"{const.BURST_NODATA} where no burst observed the cell"}
     # Selecting and filling floated the masks; they go back to class codes here.
     return mask_codes(combined)
+
+
+def _with_burst_layer(part):
+    """A burst with its own burst layer: its code on every cell."""
+    code = (burst_code(part.attrs["burst_id"]) if part.attrs.get("burst_id")
+            else const.BURST_NODATA)
+    shape = (part.sizes["y"], part.sizes["x"])
+    return part.assign({const.BURST_LAYER: (("y", "x"), np.full(shape, code, "int32"))})
 
 
 def _keep_attrs(combined, reference):

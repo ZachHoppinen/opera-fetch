@@ -347,3 +347,18 @@ def test_bursts_that_disagree_on_an_acquisition_are_warned_about(caplog):
 
     assert merged.absolute_orbit.values[0] == 100
     assert "disagree on absolute_orbit" in caplog.text
+
+
+def test_a_burst_mosaicked_beside_a_mosaic_keeps_its_own_burst_code():
+    """A mosaic carries a burst layer and a raw burst carries only its ID. The raw burst's
+    cells came out as observed by no burst, so they could not be cut back out."""
+    from opera_fetch import burst_code
+
+    a, b = two_overlapping_bursts(fill_a=1.0, fill_b=2.0)
+    already = mosaic([b], how="first")
+    already.attrs["burst_id"] = ""
+
+    merged = mosaic([a, already], how="first")
+
+    assert merged.burst_id.isel(y=0, x=0).values == burst_code("T049-103327-IW3")
+    assert merged.burst_id.isel(y=0, x=10).values == burst_code("T049-103328-IW3")

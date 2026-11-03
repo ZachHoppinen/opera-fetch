@@ -212,37 +212,50 @@ def assemble(paths, aoi=None, aoi_crs=None, how=None, tolerance=TOLERANCE,
     return stacks
 
 
-def _combined_by_track(stacks, how=None):
+def _combined_by_track(stacks, how=None, preferred=None):
     """Zones already on one grid, with each track's zones combined into one, as a list.
 
     A pass across a zone line arrives once from each zone, at one timestamp since
     _aligned_across_zones. The zones of a track are combined by ``mosaic.combine``, as
     bursts are: "mean" weighs by looks and sums them, "first" chooses each cell's zone
-    once for every date, and how defaults the way mosaic's does. Different tracks are not
-    combined, since two tracks at one timestamp are two acquisitions from two geometries.
+    once for every date. Different tracks are not combined, since two tracks at one
+    timestamp are two acquisitions from two geometries.
+
+    preferred is the position of the zone that was not resampled. It goes first within
+    each track, so "first" takes OPERA's own values wherever that zone saw the cell.
     """
     by_orbit = defaultdict(list)
     for position, stack in enumerate(stacks):
         if "track" not in stack.coords or "direction" not in stack.coords:
             # Without its track a stack cannot be matched to another, so it combines with
             # nothing rather than risk two geometries in one step.
-            by_orbit[(-1 - position, "")].append(stack)
+            by_orbit[(-1 - position, "")].append(position)
             continue
-        orbits = sorted(set(zip(stack["track"].values.tolist(),
-                                stack["direction"].values.tolist(), strict=True)))
-        for track, direction in orbits:
-            here = (stack["track"] == track) & (stack["direction"] == direction)
-            by_orbit[(track, direction)].append(stack.isel(time=np.flatnonzero(here.values)))
+        orbits = set(zip(stack["track"].values.tolist(), stack["direction"].values.tolist(),
+                         strict=True))
+        for orbit in sorted(orbits):
+            by_orbit[orbit].append(position)
+
+    # Nothing spans two zones, so there is nothing to combine and nothing to slice.
+    if all(len(positions) == 1 for positions in by_orbit.values()):
+        return list(stacks)
 
     combined = []
     # In the order the zones first gave them, which is the order the time stack kept before.
-    for (track, direction), parts in by_orbit.items():
+    for (track, direction), positions in by_orbit.items():
+        if len(positions) == 1 and track < 0:
+            combined.append(stacks[positions[0]])
+            continue
+        positions = sorted(positions, key=lambda position: position != preferred)
+        parts = []
+        for position in positions:
+            stack = stacks[position]
+            here = (stack["track"] == track) & (stack["direction"] == direction)
+            parts.append(stack.isel(time=np.flatnonzero(here.values)))
         if len(parts) == 1:
             combined.append(parts[0])
             continue
-        complex_data = any(np.issubdtype(part[name].dtype, np.complexfloating)
-                           for part in parts for name in part.data_vars)
-        joined = combine(parts, how or ("first" if complex_data else "mean"))
+        joined = combine(parts, how)
         joined.attrs = parts[0].attrs
         combined.append(joined.rio.write_crs(parts[0].rio.crs))
         log.info("T%03d %s: its %d zones combined into one", track, direction, len(parts))
@@ -451,8 +464,11 @@ def _onto_one_crs(stacks, crs, resampling=None, overlap=None):
         reference = reference.rio.reproject(target, resampling=how)
 
     moved = []
+    preferred = None
     for epsg, stack in sorted(stacks.items()):
         if CRS.from_user_input(stack.rio.crs) == CRS.from_user_input(reference.rio.crs):
+            # Left where OPERA put it, so its values are the ones to keep where zones meet.
+            preferred = len(moved)
             moved.append(stack)
             continue
         log.warning("resampling EPSG:%d onto %s, which is the one place this package "
@@ -486,7 +502,7 @@ def _onto_one_crs(stacks, crs, resampling=None, overlap=None):
     # Reprojecting floats a mask wherever a cell has no source, which _stacked_in_time
     # puts back to class codes along with everything else its own join fills.
     # A pass across a zone line arrives once from each zone; its zones become one first.
-    joined = _stacked_in_time(_combined_by_track(moved, overlap), join="outer")
+    joined = _stacked_in_time(_combined_by_track(moved, overlap, preferred), join="outer")
     joined = joined.sortby("time")
 
     joined.attrs = _across_zones([stacks[epsg] for epsg in sorted(stacks)])
