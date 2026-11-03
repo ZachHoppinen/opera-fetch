@@ -295,14 +295,55 @@ def bursts_with_a_missing_date():
 
 
 @pytest.mark.parametrize("how", ["mean", "first"])
-def test_a_date_one_burst_is_missing_keeps_its_platform_and_orbit(how):
+@pytest.mark.parametrize("chunked", [True, False])
+@pytest.mark.parametrize("first_is_short", [False, True])
+def test_a_date_one_burst_is_missing_keeps_its_platform_and_orbit(how, chunked, first_is_short):
     """The archive missing a date for one burst padded that burst's platform with NaN in
     the join across bursts, which made the text an object array: dask refused to join it,
-    and where it did not refuse the platform fell out of the mosaic. Both describe the
-    acquisition, so they come back whole from the bursts that saw it."""
-    merged = mosaic(bursts_with_a_missing_date(), how=how)
+    and in memory the averaged mosaic dropped it. Both describe the acquisition, so they
+    come back whole from the bursts that saw it, whichever burst is short and however the
+    bursts are held."""
+    a, b = bursts_with_a_missing_date()
+    if not chunked:
+        a, b = a.load(), b.load()
+    bursts = [b, a] if first_is_short else [a, b]
+
+    merged = mosaic(bursts, how=how)
 
     assert list(merged.platform.values) == ["S1C", "S1D", "S1C"]
     assert list(merged.absolute_orbit.values) == [100, 200, 300]
     assert merged.absolute_orbit.dtype == np.int64
     assert merged.sizes["time"] == 3
+
+
+def test_a_rebuilt_platform_is_as_wide_as_the_widest_burst_gives_it():
+    """read_burst writes "" when the PLATFORM tag is missing, a one-character string. Cast
+    back to the first burst's width, the neighbour's "S1D" on a date it lacks became "S"."""
+    a, b = bursts_with_a_missing_date()
+    blank = b.assign_coords(platform=("time", ["", ""]))   # b lacks the middle date
+
+    merged = mosaic([blank, a])
+
+    assert list(merged.platform.values) == ["", "S1D", ""]
+
+
+def test_rebuilt_acquisition_coordinates_carry_nothing_else():
+    """Each was rebuilt from a burst's DataArray, which brought the burst's other time
+    coordinates and spatial_ref along into the merge with the mosaic."""
+    from opera_fetch.mosaic import _acquisition_coords
+
+    rebuilt = _acquisition_coords(bursts_with_a_missing_date())
+    for coord in rebuilt.values():
+        assert set(coord.coords) == {"time"}
+
+
+def test_bursts_that_disagree_on_an_acquisition_are_warned_about(caplog):
+    """Bursts of one pass share platform and orbit, so a difference means two acquisitions
+    were stamped as one. The first burst's value is kept, and the clash is said out loud."""
+    a, b = bursts_with_a_missing_date()
+    b = b.assign_coords(absolute_orbit=("time", [999, 300]))
+
+    merged = mosaic([a, b])
+
+    assert merged.absolute_orbit.values[0] == 100
+    assert "disagree on absolute_orbit" in caplog.text

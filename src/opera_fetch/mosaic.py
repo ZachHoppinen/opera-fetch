@@ -136,19 +136,36 @@ def _acquisition_coords(placed):
     a date the burst lacks pads them with NaN: text becomes an object array that dask
     refuses to concatenate, and integers become floats.
 
+    Where bursts give one date different values the first burst's is kept, and the clash
+    is logged, since it means two acquisitions were stamped as one pass.
+
     Loaded, since they are one value per date and the join below is on their labels.
     """
     names = {name for burst in placed for name, coord in burst.coords.items()
              if coord.dims == ("time",) and name != "time"}
     whole = {}
     for name in sorted(names):
-        parts = [burst[name].load() for burst in placed if name in burst.coords]
+        # Stripped to the values and their dates, so no sibling coordinate rides along.
+        parts = [burst[name].reset_coords(drop=True).load()
+                 for burst in placed if name in burst.coords]
+        _warn_if_bursts_disagree(name, parts)
         coord = reduce(lambda a, b: a.combine_first(b), parts)
-        # Every date some burst saw has a value, so the padding is gone and the type returns.
+        # Every date some burst saw has a value, so the padding is gone and the type returns,
+        # as wide as the widest burst gives it so no burst's text is cut short.
         if not coord.isnull().any():
-            coord = coord.astype(parts[0].dtype)
+            coord = coord.astype(np.result_type(*[part.dtype for part in parts]))
         whole[name] = coord
     return whole
+
+
+def _warn_if_bursts_disagree(name, parts):
+    """Log the dates on which bursts give an acquisition coordinate different values."""
+    values = pd.concat([part.to_series() for part in parts])
+    distinct = values.groupby(level=0).nunique()
+    clashing = distinct.index[distinct > 1]
+    if len(clashing):
+        log.warning("bursts disagree on %s for %d date(s), first %s; keeping the first "
+                    "burst's value", name, len(clashing), clashing[0])
 
 
 def _mean(placed):

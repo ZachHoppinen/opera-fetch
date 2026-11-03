@@ -99,14 +99,9 @@ def _open(path, chunks):
 
     Unmasked on purpose: masking would upcast the uint8 layover mask to float and turn its
     255 nodata into a gap, and the float layers already carry NaN nodata.
-
-    No read lock. rioxarray's default lock lets one thread read at a time across every
-    file, which held a 42-date, two-burst East River load to 2.9 cores and 25 s; without it
-    the same load took 17 s on 4.5 cores and returned identical vv, vh and mask.
     """
     return rioxarray.open_rasterio(
-        path, chunks={"x": chunks, "y": chunks}, masked=False,
-        lock=False).squeeze("band", drop=True)
+        path, chunks={"x": chunks, "y": chunks}, masked=False).squeeze("band", drop=True)
 
 
 def _granules(paths):
