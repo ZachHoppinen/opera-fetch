@@ -654,3 +654,46 @@ def test_a_pass_short_of_a_layer_does_not_float_the_mask(caplog):
     assert stacked["mask"].dtype == np.uint8
     assert sorted(np.unique(stacked["mask"].values).tolist()) == [0, 255]
     assert "mask" in caplog.text
+
+
+def _a_pass_across_the_zone_line(directory):
+    """One track's pass on two dates, its western burst in 12N and its eastern in 13N, the
+    eastern acquired six seconds earlier, as T049 crosses 108 W."""
+    from tests.granules import write_granule
+
+    paths = []
+    for day in ("20251005", "20251017"):
+        paths += write_granule(directory, "T049-103319-IW2", f"{day}T010925",
+                               f"{day}T120000", epsg=32612)
+        paths += write_granule(directory, "T049-103320-IW3", f"{day}T010919",
+                               f"{day}T120000", epsg=32613)
+    return paths
+
+
+def test_a_pass_across_the_zone_line_is_one_acquisition_once_reprojected(tmp_path):
+    """Each zone stamped its half of a pass from its own first burst, six seconds apart,
+    and the join onto one CRS matched timestamps exactly: every pass became two time
+    steps on one day, each covering half the area."""
+    from opera_fetch.stack import assemble
+
+    joined = assemble(_a_pass_across_the_zone_line(tmp_path), reproject_to="EPSG:32613")
+
+    assert joined.sizes["time"] == 2
+    assert list(joined.indexes["time"].strftime("%Y-%m-%d")) == ["2025-10-05", "2025-10-17"]
+    # The two zones cover the same ground here, so every cell either zone saw is observed
+    # on both dates, and the merged mask is still a class code.
+    observed = np.isfinite(joined.vv).any("time")
+    assert bool(observed.any())
+    assert bool((np.isfinite(joined.vv).sum("time") == 2).where(observed, True).all())
+    assert joined.mask.dtype == np.uint8
+
+
+def test_both_halves_of_a_pass_across_the_zone_line_carry_one_timestamp(tmp_path):
+    """Left on their own zones the two halves still describe one acquisition, so a caller
+    joining them later finds them at the same time."""
+    from opera_fetch.stack import assemble
+
+    zones = assemble(_a_pass_across_the_zone_line(tmp_path))
+
+    assert sorted(zones) == [32612, 32613]
+    assert list(zones[32612].indexes["time"]) == list(zones[32613].indexes["time"])

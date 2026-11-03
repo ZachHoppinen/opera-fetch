@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- A pass that crosses a UTM zone line is one acquisition again. Each zone stamped its
+  half from its own first burst, and on T049 at 108 W the 13N half came out six seconds
+  before the 12N half; joined with `reproject_to`, every pass became two time steps on
+  one day, each covering half the area. Passes are now stamped over every zone of a
+  track at once, and steps of one track and direction that land on one timestamp merge
+  as a mosaic merges bursts: real layers by mean, masks by worst code, complex layers
+  by the first zone. Two tracks at one timestamp stay two steps.
+
 - A mosaic whose bursts do not all share every date no longer fails or loses its
   `platform`. The join across bursts padded a burst's `platform` with NaN on a date it
   lacked, which made the text an object array: chunked, as `read_burst` delivers it, dask

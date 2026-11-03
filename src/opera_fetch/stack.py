@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 import numpy as np
+import pandas as pd
 import xarray as xr
 from pyproj import CRS
 
@@ -160,18 +161,24 @@ def assemble(paths, aoi=None, aoi_crs=None, how=None, tolerance=TOLERANCE,
 
     if aoi is not None:
         aoi = as_geometry(aoi, aoi_crs)
-    mosaicked = defaultdict(list)
+    reaching = {}
     for key, group in sorted(passes.items()):
         wanted = _overlapping(group, aoi) if aoi is not None else group
         if not wanted:
             log.info("%s: no burst reaches the AOI", key)
             continue
+        reaching[key] = wanted
+    # Stamped over every zone of a track at once, so both halves of a pass across a zone
+    # line carry one timestamp rather than each its own first burst's.
+    aligned = _aligned_across_zones(reaching, tolerance)
 
+    mosaicked = defaultdict(list)
+    for key, wanted in sorted(aligned.items()):
         # Sizing the grid from the AOI keeps a whole track from being mostly empty space.
         # Every pass of a zone gets the same bounds, and they are already on one lattice,
         # so the grids come out identical and the passes concatenate without resampling.
         area = None if aoi is None else projected(aoi, key.epsg).bounds
-        stack = mosaic(align_passes(wanted, tolerance), bounds=area, how=how)
+        stack = mosaic(wanted, bounds=area, how=how)
         if aoi is not None and mask:
             stack = clip(stack, aoi, mask=True)
 
@@ -204,6 +211,75 @@ def assemble(paths, aoi=None, aoi_crs=None, how=None, tolerance=TOLERANCE,
     if reproject_to is not None:
         return _onto_one_crs(stacks, reproject_to, resampling)
     return stacks
+
+
+def _merged_repeats(stack):
+    """One time step per timestamp, combining the steps that share one.
+
+    Zones joined onto one grid each deliver their part of a pass that crosses the zone
+    line, at the same timestamp once aligned. A cell takes its value from whichever zone
+    saw it, and where both did they combine as mosaic combines bursts: real layers by
+    mean, masks by worst code, complex layers by the first zone, since two zones' phases
+    share no datum any more than two bursts' do.
+
+    Only steps of one track and direction merge. Two tracks at one timestamp are two
+    acquisitions seen from two geometries, and stay two steps.
+    """
+    times = stack.indexes["time"]
+    tracks = stack["track"].values if "track" in stack.coords else np.zeros(times.size)
+    directions = (stack["direction"].values if "direction" in stack.coords
+                  else np.zeros(times.size))
+    # One label per acquisition: when, and from which pass geometry.
+    labels, unique = pd.factorize(pd.MultiIndex.from_arrays([times, tracks, directions]))
+    if len(unique) == times.size:
+        return stack
+
+    product = stack.attrs.get("product", const.RTC)
+    nodata = const.MASK_NODATA[product]
+    # The first step of each acquisition carries its per-acquisition coordinates, which the
+    # zones agree on, and the static layers, which have no time to repeat.
+    _, first = np.unique(labels, return_index=True)
+    merged = stack.isel(time=first)
+    step = xr.DataArray(labels, dims="time", name="step")
+    for name, array in stack.data_vars.items():
+        if "time" not in array.dims:
+            continue
+        grouped = array.where(array != nodata) if name.endswith("mask") else array
+        # Unobserved is not a code to take the worst of; mask_codes puts it back.
+        if name.endswith("mask"):
+            combined = grouped.groupby(step).max(skipna=True)
+        elif np.issubdtype(array.dtype, np.complexfloating):
+            combined = grouped.groupby(step).first(skipna=True)
+        else:
+            combined = grouped.groupby(step).mean(skipna=True)
+        # Back onto the time axis, in the acquisition order the labels were given in.
+        combined = combined.rename(step="time").transpose(*array.dims)
+        merged[name] = combined.assign_coords(time=merged["time"])
+    log.info("%d time steps from zones on one grid merged into %d acquisitions",
+             times.size, merged.sizes["time"])
+    return mask_codes(merged)
+
+
+def _aligned_across_zones(passes, tolerance):
+    """Every pass's bursts, stamped by align_passes over all zones of its track at once.
+
+    A track crossing a zone line is split between two keys, one a zone. Aligned one key
+    at a time, each half took its own first burst's timestamp: on T049 at 108 W the 13N
+    half was stamped six seconds before the 12N half, and joined onto one CRS every pass
+    became two time steps on one day, each covering half the area.
+    """
+    by_orbit = defaultdict(list)
+    for key in sorted(passes):
+        by_orbit[(key.track, key.direction)].append(key)
+
+    aligned = {}
+    for keys in by_orbit.values():
+        bursts = [burst for key in keys for burst in passes[key]]
+        stamped = iter(align_passes(bursts, tolerance))
+        # align_passes keeps the order it is given, so each key takes its own back.
+        for key in keys:
+            aligned[key] = [next(stamped) for _ in passes[key]]
+    return aligned
 
 
 def _asked_for(key, track, direction):
@@ -413,6 +489,8 @@ def _onto_one_crs(stacks, crs, resampling=None):
     # Reprojecting floats a mask wherever a cell has no source, which _stacked_in_time
     # puts back to class codes along with everything else its own join fills.
     joined = _stacked_in_time(moved, join="outer").sortby("time")
+    # A pass across a zone line arrives once from each zone, now on one grid and one time.
+    joined = _merged_repeats(joined)
 
     joined.attrs = _across_zones([stacks[epsg] for epsg in sorted(stacks)])
     joined.attrs.update(epsg=target.to_epsg(), reprojected_from=sorted(stacks))
