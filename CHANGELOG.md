@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- A reprocessed RTC granule replaces its original even when the two disagree about the
+  acquisition time by milliseconds. Duplicates were matched on the
+  `ZERO_DOPPLER_START_TIME` tag, and on T078 over Colorado ASF serves two processings of
+  2024-10-30 and 2025-04-22 whose tags differ by 6 ms, so both were kept; joined into a
+  pass they shared one timestamp and validation refused the stack ("1 timestamps appear
+  more than once"). They are now matched on the whole-second stamp in the filename, as
+  the CSLC reader already did.
+
 - A pass that crosses a UTM zone line is one acquisition again. Each zone stamped its
   half from its own first burst, and on T049 at 108 W the 13N half came out six seconds
   before the 12N half; joined with `reproject_to`, every pass became two time steps on
