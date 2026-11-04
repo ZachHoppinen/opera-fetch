@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- A stack whose dates switch between VV+VH and HH+HV is no longer reported as empty.
+  Coverage and the check for a pass with any data looked only at the first polarization,
+  so where T154 over Svalbard alternates modes, the HH dates read as unobserved: with
+  more of them than VV dates the median coverage was 0 and validation refused the stack
+  with "no acquisition has a single finite pixel". A cell now counts as observed when any
+  backscatter layer holds a value there (`validate.observed_anywhere`).
+
+- The weekly live tests draw their area from a random stretch of the RTC archive rather
+  than seven fixed sites, a third of weeks over a box wide enough to span several bursts
+  and tracks, with Svalbard kept for a quarter of weeks as the HH+HV case.
+
 - A reprocessed RTC granule replaces its original even when the two disagree about the
   acquisition time by milliseconds. Duplicates were matched on the
   `ZERO_DOPPLER_START_TIME` tag, and on T078 over Colorado ASF serves two processings of

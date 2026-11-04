@@ -626,6 +626,6 @@ def _has_data(stack):
     it is given, so a pass whose first date happens to be empty can have every later date
     behind it, and dropping the pass then reads as an AOI that covers nothing.
     """
-    from opera_fetch.validate import primary_variable
+    from opera_fetch.validate import observed_anywhere
 
-    return bool(np.isfinite(stack[primary_variable(stack)]).any())
+    return bool(observed_anywhere(stack).any())

@@ -24,6 +24,29 @@ def test_coverage_is_counted_over_every_finite_pixel():
     assert found["coverage"][1] == 1.0
 
 
+def mixed_polarizations():
+    """VV on the first date and HH on the second, as T154 over Svalbard alternates."""
+    burst = make_burst(west=500_010, north=4_332_210, times=2)
+    burst["hh"] = burst["vv"].copy()
+    burst["vv"][1] = np.nan
+    burst["hh"][0] = np.nan
+    return burst
+
+
+def test_a_date_observed_in_another_polarization_is_covered():
+    found = report(mixed_polarizations())
+    assert list(found["coverage"]) == [1.0, 1.0]
+    assert found["damage"] == []
+
+
+def test_a_pass_observed_only_in_another_polarization_has_data():
+    from opera_fetch.stack import _has_data
+
+    burst = mixed_polarizations()
+    burst["vv"][:] = np.nan
+    assert _has_data(burst)
+
+
 def test_a_repeated_timestamp_is_damage():
     burst = make_burst(west=500_010, north=4_332_210, times=2)
     burst = burst.assign_coords(time=[burst.indexes["time"][0]] * 2)
