@@ -68,7 +68,7 @@ def report(stack, aoi=None, strict=True):
 
     # Coverage over every observed pixel, with no mask or threshold applied.
     if times is not None:
-        finite = _observed(stack[primary_variable(stack)], stack).mean(dim=("y", "x"))
+        finite = observed_anywhere(stack).mean(dim=("y", "x"))
         if hasattr(finite.data, "compute"):
             finite = finite.compute()
         finite = np.asarray(finite)
@@ -192,6 +192,21 @@ def primary_variable(stack):
     if not stack.data_vars:
         raise ValueError("the stack holds no variables")
     return next(iter(timed), next(iter(stack.data_vars)))
+
+
+def observed_anywhere(stack):
+    """Where any backscatter layer holds an observation, or the primary layer if none does.
+
+    One layer is not enough: where Sentinel-1 switches mode between passes, as T154 does
+    over Svalbard, a date can be VV+VH and the next HH+HV, and each leaves the other empty.
+    """
+    backscatter = [name for name in ("vv", "hh", "vh", "hv") if name in stack.data_vars]
+    if not backscatter:
+        return _observed(stack[primary_variable(stack)], stack)
+    seen = np.isfinite(stack[backscatter[0]])
+    for name in backscatter[1:]:
+        seen = seen | np.isfinite(stack[name])
+    return seen
 
 
 def _observed(array, stack):

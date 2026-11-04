@@ -29,17 +29,20 @@ from opera_fetch import filenames
 
 pytestmark = pytest.mark.network
 
-# Mountain areas with dependable Sentinel-1 coverage, plus one polar site where the
-# acquisition is HH+HV rather than VV+VH.
-SITES = {
-    "alaska range": (-149.5, 62.0),
-    "wind rivers": (-109.7, 43.1),
-    "sierra nevada": (-119.3, 37.8),
-    "colorado rockies": (-107.0, 39.0),
-    "north cascades": (-121.0, 48.6),
-    "sawtooths": (-114.9, 44.0),
-    "svalbard": (15.5, 78.2),
-}
+# A polar site where the acquisition is HH+HV rather than VV+VH, kept so that branch of the
+# reader is exercised on a schedule rather than whenever the draw happens to land there.
+POLAR_SITE = ("svalbard", (15.5, 78.2))
+POLAR_SHARE = 0.25
+
+# Half-widths in degrees. Small is a burst or two; wide reaches across several bursts, so it
+# can catch bursts that disagree about dates, a zone line, or a reprocessed duplicate.
+SMALL_BOX = (0.08, 0.05)
+WIDE_BOX = (0.25, 0.25)
+WIDE_SHARE = 0.33
+
+# How long a stretch of the archive to draw a granule from, and how many to try.
+DRAW_MINUTES = 30
+DRAW_TRIES = 5
 
 # The fetch errors that mean this week's box has nothing in it, rather than a fault.
 NOTHING_HERE = ("granules for that area and date range", "nothing overlapped the AOI")
@@ -68,20 +71,48 @@ def week():
     return random.Random(seed), seed
 
 
+def drawn_granule(rng):
+    """Where and when a granule the archive really holds was acquired, drawn at random.
+
+    Searches a short stretch of time with no area at all, so the draw covers wherever
+    OPERA has produced RTC rather than a list someone wrote down.
+    """
+    import asf_search as asf
+    from shapely.geometry import shape
+
+    for _ in range(DRAW_TRIES):
+        # Somewhere in the last two years, but not the last fortnight, which the archive
+        # may not have caught up with yet.
+        minutes_back = rng.randrange(14 * 24 * 60, 714 * 24 * 60)
+        moment = datetime.now(UTC) - timedelta(minutes=minutes_back)
+        found = asf.search(dataset=asf.DATASET.OPERA_S1, processingLevel=of.RTC,
+                           start=moment, end=moment + timedelta(minutes=DRAW_MINUTES))
+        if found:
+            # Sorted so the same week draws the same granule however ASF orders a reply.
+            granules = sorted(found, key=lambda g: g.properties["fileID"])
+            granule = rng.choice(granules)
+            centre = shape(granule.geometry).centroid
+            acquired = pd.Timestamp(granule.properties["startTime"]).date()
+            return granule.properties["fileID"], (centre.x, centre.y), acquired
+    pytest.skip(f"ASF returned nothing in {DRAW_TRIES} draws of {DRAW_MINUTES} minutes")
+
+
 @pytest.fixture(scope="module")
 def case(week):
-    """An area and a date range for this week."""
+    """An area and a date range for this week, around a granule the archive holds."""
     rng, _ = week
-    name = rng.choice(sorted(SITES))
-    lon, lat = SITES[name]
-    # A small box: enough for a burst or two, not enough to be a slow download.
-    aoi = (lon - 0.08, lat - 0.05, lon + 0.08, lat + 0.05)
+    if rng.random() < POLAR_SHARE:
+        name, (lon, lat) = POLAR_SITE
+        acquired = date.today() - timedelta(days=14 + rng.randrange(0, 700))
+    else:
+        name, (lon, lat), acquired = drawn_granule(rng)
+    half_x, half_y = WIDE_BOX if rng.random() < WIDE_SHARE else SMALL_BOX
+    aoi = (lon - half_x, lat - half_y, lon + half_x, lat + half_y)
 
-    # A month, somewhere in the last two years but not the last fortnight, which the
-    # archive may not have caught up with yet.
-    end = date.today() - timedelta(days=14 + rng.randrange(0, 700))
+    # A month ending just after the acquisition, so it is inside the window.
+    end = acquired + timedelta(days=1)
     start = end - timedelta(days=30)
-    print(f"  site: {name} {aoi}\n  window: {start} to {end}")
+    print(f"  around: {name} {tuple(round(v, 3) for v in aoi)}\n  window: {start} to {end}")
     return aoi, str(start), str(end)
 
 
@@ -159,9 +190,12 @@ def test_a_real_fetch_still_assembles_onto_operas_lattice(case, tmp_path):
         backscatter = [name for name in stack.data_vars
                        if name in ("vv", "vh", "hh", "hv")]
         assert backscatter, f"no backscatter in {sorted(stack.data_vars)}"
-        values = stack[backscatter[0]].isel(time=0).values
-        assert np.isfinite(values).any()
-        assert np.nanmin(values) >= 0, "linear power cannot be negative"
+        # Any polarization: where the mode switches between passes, a date holds only one pair.
+        first_date = [stack[name].isel(time=0).values for name in backscatter]
+        assert any(np.isfinite(values).any() for values in first_date)
+        for values in first_date:
+            if np.isfinite(values).any():
+                assert np.nanmin(values) >= 0, "linear power cannot be negative"
 
         if "mask" in stack:
             codes = set(np.unique(stack.mask.values).tolist())
