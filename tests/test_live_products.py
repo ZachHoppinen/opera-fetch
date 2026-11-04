@@ -41,6 +41,9 @@ SITES = {
     "svalbard": (15.5, 78.2),
 }
 
+# The fetch errors that mean this week's box has nothing in it, rather than a fault.
+NOTHING_HERE = ("granules for that area and date range", "nothing overlapped the AOI")
+
 
 def week_seed():
     """This week's seed, or whatever OPERA_FETCH_SEED names.
@@ -139,6 +142,10 @@ def test_a_real_fetch_still_assembles_onto_operas_lattice(case, tmp_path):
     try:
         stacks = of.fetch_stacks(aoi, start, end, product=of.RTC, cache_dir=tmp_path)
     except ValueError as err:
+        # Only an empty archive or a burst that misses the box is a skip. Anything else is
+        # the package failing on real data, as duplicate timestamps on T078 did.
+        if not any(reason in str(err) for reason in NOTHING_HERE):
+            raise
         pytest.skip(f"nothing to assemble this week: {err}")
 
     for key, stack in stacks.items():
