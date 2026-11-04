@@ -67,9 +67,11 @@ def read_burst(paths, chunks=CHUNK):
         platforms.append(first.attrs.get("PLATFORM", "").replace("Sentinel-1", "S1"))
         orbits.append(int(first.attrs.get("ABSOLUTE_ORBIT_NUMBER", -1)))
 
-    # Drop reprocessed duplicates, then put what survives in time order.
+    # Drop reprocessed duplicates, then put what survives in time order. Keyed on the
+    # filename's whole-second stamp: a reprocessing can move the tag's time by milliseconds.
     names = list(granules)
-    keep = sorted(filenames.keep_latest_processing(times, names).values())
+    acquired = [filenames.parse_acquisition_time(name) for name in names]
+    keep = sorted(filenames.keep_latest_processing(acquired, names).values())
     slices = [slices[i] for i in keep]
     platforms = [platforms[i] for i in keep]
     orbits = [orbits[i] for i in keep]

@@ -337,6 +337,24 @@ def test_a_reprocessed_granule_replaces_the_one_it_supersedes(tmp_path):
     compare("reprocessed", digest(stack, exact=True))
 
 
+def test_a_reprocessing_that_moves_the_time_tag_still_replaces_the_original(tmp_path):
+    """T078 over Colorado on 2025-04-22: two processings two minutes apart whose
+    ZERO_DOPPLER_START_TIME tags differ by 6 ms. Both were kept, and joining the bursts
+    gave the pass the same time twice."""
+    import rasterio
+
+    original = write_granule(tmp_path, "T049-103327-IW3", "20241004T011054", "20241004T043235")
+    reprocessed = write_granule(tmp_path, "T049-103327-IW3", "20241004T011054", "20241121T000000")
+    # The reprocessing reports the acquisition a few milliseconds off the original.
+    for path in reprocessed:
+        with rasterio.open(path, "r+") as handle:
+            handle.update_tags(ZERO_DOPPLER_START_TIME="2024-10-04T01:10:54.069292Z")
+
+    stack = assemble([str(p) for p in original + reprocessed])[32612]
+    assert stack.sizes["time"] == 1, "one acquisition, not one per processing"
+    assert "20241121" in stack.attrs["granules"], "the reprocessing is what was used"
+
+
 def test_two_zones_land_on_one_grid_the_same_way_they_always_have(two_zones):
     """The path a package downstream takes unconditionally, and where the provenance and
     the mask codes both went wrong before."""
